@@ -78,7 +78,7 @@ export interface Inputs extends Record<string, any> {
   /**
    * Auth info about user selected APIs.
    */
-  apiAuthData?: AuthInfo;
+  apiAuthData?: AuthInfo[];
 }
 
 export type InputsWithProjectPath = Inputs & { projectPath: string };
@@ -153,13 +153,14 @@ export interface CreateProjectResult {
   warnings?: Warning[];
   shouldInvokeTeamsAgent?: boolean;
   projectId?: string;
+  lastCommand?: string;
 }
 
 export interface TeamsAppInputs extends InputsWithProjectPath {
   "manifest-file"?: string;
   "package-file"?: string;
   "output-package-file"?: string;
-  "output-manifest-file"?: string;
+  "output-folder"?: string;
   env?: string;
   "env-file"?: string;
 }

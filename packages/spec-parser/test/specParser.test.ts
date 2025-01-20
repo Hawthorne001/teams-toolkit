@@ -20,6 +20,8 @@ import jsyaml from "js-yaml";
 import mockedEnv, { RestoreFn } from "mocked-env";
 import { SMEValidator } from "../src/validators/smeValidator";
 import { ValidatorFactory } from "../src/validators/validatorFactory";
+import { createHash } from "crypto";
+import { JsonDataGenerator } from "../src/jsonDataGenerator";
 
 describe("SpecParser", () => {
   afterEach(() => {
@@ -133,16 +135,15 @@ describe("SpecParser", () => {
 
       const result = await specParser.validate();
 
-      expect(result).to.deep.equal({
-        status: ValidationStatus.Warning,
-        errors: [],
-        warnings: [
-          {
-            type: WarningType.ConvertSwaggerToOpenAPI,
-            content: ConstantString.ConvertSwaggerToOpenAPI,
-          },
-        ],
-      });
+      expect(result.warnings).to.deep.equal([
+        {
+          type: WarningType.ConvertSwaggerToOpenAPI,
+          content: ConstantString.ConvertSwaggerToOpenAPI,
+        },
+      ]);
+      expect(result.status).equal(ValidationStatus.Warning);
+      expect(result.errors).to.be.an("array").that.is.empty;
+
       sinon.assert.calledOnce(dereferenceStub);
     });
 
@@ -221,16 +222,14 @@ describe("SpecParser", () => {
 
       const result = await specParser.validate();
 
-      expect(result).to.deep.equal({
-        status: ValidationStatus.Error,
-        errors: [
-          {
-            type: ErrorType.SwaggerNotSupported,
-            content: ConstantString.SwaggerNotSupported,
-          },
-        ],
-        warnings: [],
-      });
+      expect(result.warnings).to.be.an("array").that.is.empty;
+      expect(result.status).equal(ValidationStatus.Error);
+      expect(result.errors).to.deep.equal([
+        {
+          type: ErrorType.SwaggerNotSupported,
+          content: ConstantString.SwaggerNotSupported,
+        },
+      ]);
     });
 
     it("should return an error result object if no server information", async function () {
@@ -250,6 +249,7 @@ describe("SpecParser", () => {
           { type: ErrorType.NoServerInformation, content: ConstantString.NoServerInformation },
           { type: ErrorType.NoSupportedApi, content: ConstantString.NoSupportedApi, data: [] },
         ],
+        specHash: "",
       });
       sinon.assert.calledOnce(dereferenceStub);
     });
@@ -275,6 +275,7 @@ describe("SpecParser", () => {
           },
           { type: ErrorType.NoSupportedApi, content: ConstantString.NoSupportedApi, data: [] },
         ],
+        specHash: createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex"),
       });
       sinon.assert.calledOnce(dereferenceStub);
     });
@@ -304,6 +305,7 @@ describe("SpecParser", () => {
           },
           { type: ErrorType.NoSupportedApi, content: ConstantString.NoSupportedApi, data: [] },
         ],
+        specHash: createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex"),
       });
       sinon.assert.calledOnce(dereferenceStub);
     });
@@ -324,6 +326,7 @@ describe("SpecParser", () => {
         errors: [
           { type: ErrorType.NoSupportedApi, content: ConstantString.NoSupportedApi, data: [] },
         ],
+        specHash: createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex"),
       });
       sinon.assert.calledOnce(dereferenceStub);
     });
@@ -381,6 +384,9 @@ describe("SpecParser", () => {
 
       expect(result.errors[0].type).equal(ErrorType.RemoteRefNotSupported);
       expect(result.status).equal(ValidationStatus.Error);
+      expect(result.specHash).to.equal(
+        createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex")
+      );
     });
 
     it("should return an warning result object if missing operation id", async function () {
@@ -439,6 +445,7 @@ describe("SpecParser", () => {
           },
         ],
         errors: [],
+        specHash: createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex"),
       });
       sinon.assert.calledOnce(dereferenceStub);
     });
@@ -504,6 +511,7 @@ describe("SpecParser", () => {
             ],
           },
         ],
+        specHash: createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex"),
       });
       sinon.assert.calledOnce(dereferenceStub);
     });
@@ -557,6 +565,9 @@ describe("SpecParser", () => {
       expect(result.status).to.equal(ValidationStatus.Valid);
       expect(result.warnings).to.be.an("array").that.is.empty;
       expect(result.errors).to.be.an("array").that.is.empty;
+      expect(result.specHash).to.equal(
+        createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex")
+      );
       sinon.assert.calledOnce(dereferenceStub);
     });
 
@@ -609,6 +620,9 @@ describe("SpecParser", () => {
       expect(result.status).to.equal(ValidationStatus.Valid);
       expect(result.warnings).to.be.an("array").that.is.empty;
       expect(result.errors).to.be.an("array").that.is.empty;
+      expect(result.specHash).to.equal(
+        createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex")
+      );
       sinon.assert.calledOnce(dereferenceStub);
     });
 
@@ -709,6 +723,9 @@ describe("SpecParser", () => {
       expect(result.status).to.equal(ValidationStatus.Valid);
       expect(result.warnings).to.be.an("array").that.is.empty;
       expect(result.errors).to.be.an("array").that.is.empty;
+      expect(result.specHash).to.equal(
+        createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex")
+      );
     });
 
     it("should only create validator once if already created", async () => {
@@ -814,6 +831,9 @@ describe("SpecParser", () => {
       );
       expect(result.errors[0].data).equal("3.1.0");
       expect(result.status).equal(ValidationStatus.Error);
+      expect(result.specHash).to.equal(
+        createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex")
+      );
 
       sinon.assert.calledOnce(dereferenceStub);
     });
@@ -867,6 +887,9 @@ describe("SpecParser", () => {
       expect(result.status).to.equal(ValidationStatus.Valid);
       expect(result.warnings).to.be.an("array").that.is.empty;
       expect(result.errors).to.be.an("array").that.is.empty;
+      expect(result.specHash).to.equal(
+        createHash("sha256").update(JSON.stringify(spec.servers)).digest("hex")
+      );
       sinon.assert.calledOnce(dereferenceStub);
     });
 
@@ -938,7 +961,14 @@ describe("SpecParser", () => {
       const pluginFilePath = "ai-plugin.json";
 
       try {
-        await specParser.generateForCopilot(manifestPath, filter, specPath, pluginFilePath, signal);
+        await specParser.generateForCopilot(
+          manifestPath,
+          filter,
+          specPath,
+          pluginFilePath,
+          undefined,
+          signal
+        );
         expect.fail("Expected an error to be thrown");
       } catch (err) {
         expect((err as SpecParserError).message).contain(ConstantString.CancelledMessage);
@@ -964,7 +994,14 @@ describe("SpecParser", () => {
           return Promise.resolve();
         });
         const dereferenceStub = sinon.stub(specParser.parser, "dereference").resolves(spec as any);
-        await specParser.generateForCopilot(manifestPath, filter, specPath, pluginFilePath, signal);
+        await specParser.generateForCopilot(
+          manifestPath,
+          filter,
+          specPath,
+          pluginFilePath,
+          undefined,
+          signal
+        );
         expect.fail("Expected an error to be thrown");
       } catch (err) {
         expect((err as SpecParserError).message).contain(ConstantString.CancelledMessage);
@@ -1000,6 +1037,7 @@ describe("SpecParser", () => {
           filter,
           outputSpecPath,
           pluginFilePath,
+          undefined,
           signal
         );
 
@@ -1037,6 +1075,7 @@ describe("SpecParser", () => {
           filter,
           outputSpecPath,
           pluginFilePath,
+          undefined,
           signal
         );
 
@@ -1105,6 +1144,160 @@ describe("SpecParser", () => {
       expect(outputJSONStub.calledTwice).to.be.true;
     });
 
+    it("should return warning result if auth is not supported", async () => {
+      const specParser = new SpecParser("path/to/spec.yaml");
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              security: [
+                {
+                  api_key: [],
+                },
+              ],
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          securitySchemes: {
+            api_key: {
+              type: "apiKey",
+              name: "api_key",
+              in: "cookie",
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      const dereferenceStub = sinon.stub(specParser.parser, "dereference").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns(spec as any);
+      const outputFileStub = sinon.stub(fs, "outputFile").resolves();
+      const outputJSONStub = sinon.stub(fs, "outputJSON").resolves();
+      const JsyamlSpy = sinon.spy(jsyaml, "dump");
+
+      const updateManifestWithAiPluginStub = sinon
+        .stub(ManifestUpdater, "updateManifestWithAiPlugin")
+        .resolves([{}, {}, []] as any);
+
+      const filter = ["get /hello"];
+
+      const outputSpecPath = "path/to/output.yaml";
+      const pluginFilePath = "ai-plugin.json";
+      const result = await specParser.generateForCopilot(
+        "path/to/manifest.json",
+        filter,
+        outputSpecPath,
+        pluginFilePath
+      );
+
+      expect(result.allSuccess).to.be.true;
+      expect(result.warnings.length).equals(1);
+      expect(result.warnings[0].content).contains("Unsupported authorization type");
+      expect(JsyamlSpy.calledOnce).to.be.true;
+      expect(specFilterStub.calledOnce).to.be.true;
+      expect(outputFileStub.calledOnce).to.be.true;
+      expect(updateManifestWithAiPluginStub.calledOnce).to.be.true;
+      expect(outputFileStub.firstCall.args[0]).to.equal(outputSpecPath);
+      expect(outputJSONStub.calledTwice).to.be.true;
+    });
+
+    it("should contains warning if operation id contains special characters", async () => {
+      const specParser = new SpecParser("path/to/spec.yaml");
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              operationId: "get/hello",
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            post: {
+              operationId: "post_hello",
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      const dereferenceStub = sinon.stub(specParser.parser, "dereference").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns(spec as any);
+      const outputFileStub = sinon.stub(fs, "outputFile").resolves();
+      const outputJSONStub = sinon.stub(fs, "outputJSON").resolves();
+      const JsyamlSpy = sinon.spy(jsyaml, "dump");
+
+      const updateManifestWithAiPluginStub = sinon
+        .stub(ManifestUpdater, "updateManifestWithAiPlugin")
+        .resolves([{}, {}, []] as any);
+
+      const filter = ["get /hello", "post /hello"];
+
+      const outputSpecPath = "path/to/output.yaml";
+      const pluginFilePath = "ai-plugin.json";
+      const result = await specParser.generateForCopilot(
+        "path/to/manifest.json",
+        filter,
+        outputSpecPath,
+        pluginFilePath
+      );
+
+      expect(result.allSuccess).to.be.true;
+      expect(JsyamlSpy.calledOnce).to.be.true;
+      expect(specFilterStub.calledOnce).to.be.true;
+      expect(outputFileStub.calledOnce).to.be.true;
+      expect(updateManifestWithAiPluginStub.calledOnce).to.be.true;
+      expect(outputFileStub.firstCall.args[0]).to.equal(outputSpecPath);
+      expect(outputJSONStub.calledTwice).to.be.true;
+      expect(result.warnings.length).equals(1);
+      expect(result.warnings[0].content).contains("get_hello");
+    });
+
     it("should throw a SpecParserError if outputFile throws an error", async () => {
       const specParser = new SpecParser("path/to/spec.yaml");
       const spec = { openapi: "3.0.0", paths: {} };
@@ -1135,6 +1328,86 @@ describe("SpecParser", () => {
         expect(err.errorType).to.equal(ErrorType.GenerateFailed);
         expect(err.message).to.equal("Error: outputFile error");
       }
+    });
+
+    it("should generate adaptivecard for existing plugin manifest", async () => {
+      const pluginManifest = {
+        schema_version: "1",
+        name_for_human: "test",
+        description_for_human: "test",
+      };
+      const pluginManifestWithAdaptiveCard = {
+        schema_version: "1",
+        name_for_human: "test",
+        description_for_human: "test",
+        functions: [
+          {
+            name: "test",
+          },
+        ],
+      };
+      const specParser = new SpecParser("path/to/spec.yaml");
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      const dereferenceStub = sinon.stub(specParser.parser, "dereference").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns({} as any);
+      const outputFileStub = sinon.stub(fs, "outputFile").resolves();
+      const outputJSONStub = sinon.stub(fs, "outputJSON").callsFake((path, data) => {
+        if (path === "pluginFilePath") {
+          expect(data.function).to.not.be.undefined;
+          expect(data.function[0].name).to.equal("test");
+        }
+      });
+      const JsyamlSpy = sinon.spy(jsyaml, "dump");
+      sinon.stub(fs, "readJSON").resolves(pluginManifest);
+
+      const updateManifestWithAiPluginStub = sinon
+        .stub(ManifestUpdater, "updateManifestWithAiPlugin")
+        .resolves([{}, pluginManifestWithAdaptiveCard, []] as any);
+
+      const filter = ["get /hello"];
+
+      const outputSpecPath = "path/to/output.yaml";
+      const pluginFilePath = "ai-plugin.json";
+      const result = await specParser.generateForCopilot(
+        "path/to/manifest.json",
+        filter,
+        outputSpecPath,
+        pluginFilePath,
+        "existingPluginManifest"
+      );
+
+      expect(result.allSuccess).to.be.true;
+      expect(JsyamlSpy.calledOnce).to.be.true;
+      expect(specFilterStub.calledOnce).to.be.true;
+      expect(outputFileStub.calledOnce).to.be.true;
+      expect(updateManifestWithAiPluginStub.calledOnce).to.be.true;
+      expect(outputFileStub.firstCall.args[0]).to.equal(outputSpecPath);
+      expect(outputJSONStub.calledTwice).to.be.true;
     });
   });
 
@@ -1356,7 +1629,7 @@ describe("SpecParser", () => {
         .returns([
           {
             type: "AdaptiveCard",
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
             version: "1.5",
             body: [
               {
@@ -1367,6 +1640,8 @@ describe("SpecParser", () => {
             ],
           },
           "$",
+          {},
+          [],
         ]);
 
       const filter = ["get /hello"];
@@ -1380,6 +1655,76 @@ describe("SpecParser", () => {
       );
 
       expect(result.allSuccess).to.be.true;
+      expect(JsyamlSpy.calledOnce).to.be.true;
+      expect(specFilterStub.calledOnce).to.be.true;
+      expect(outputFileStub.calledOnce).to.be.true;
+      expect(manifestUpdaterStub.calledOnce).to.be.true;
+      expect(outputFileStub.firstCall.args[0]).to.equal(outputSpecPath);
+      expect(outputJSONStub.calledThrice).to.be.true;
+    });
+
+    it("should not return warning if schema is empty and not generate json data", async () => {
+      const specParser = new SpecParser("path/to/spec.yaml");
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              operationId: "helloApi",
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {},
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      const dereferenceStub = sinon.stub(specParser.parser, "dereference").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns({} as any);
+      const outputFileStub = sinon.stub(fs, "outputFile").resolves();
+      const outputJSONStub = sinon.stub(fs, "outputJSON").resolves();
+      const JsyamlSpy = sinon.spy(jsyaml, "dump");
+
+      const manifestUpdaterStub = sinon
+        .stub(ManifestUpdater, "updateManifest")
+        .resolves([{}, []] as any);
+
+      const generateAdaptiveCardStub = sinon
+        .stub(AdaptiveCardGenerator, "generateAdaptiveCard")
+        .returns([
+          {
+            type: "AdaptiveCard",
+            $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
+            version: "1.5",
+            body: [
+              {
+                type: "TextBlock",
+                text: "id: ${id}",
+                wrap: true,
+              },
+            ],
+          },
+          "$",
+          {},
+          [],
+        ]);
+
+      const filter = ["get /hello"];
+
+      const outputSpecPath = "path/to/output.yaml";
+      const result = await specParser.generate(
+        "path/to/manifest.json",
+        filter,
+        outputSpecPath,
+        "path/to/adaptiveCardFolder"
+      );
+
+      expect(result.allSuccess).to.be.true;
+      expect(result.warnings.length).equals(0);
       expect(JsyamlSpy.calledOnce).to.be.true;
       expect(specFilterStub.calledOnce).to.be.true;
       expect(outputFileStub.calledOnce).to.be.true;
@@ -1432,7 +1777,7 @@ describe("SpecParser", () => {
         .returns([
           {
             type: "AdaptiveCard",
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
             version: "1.5",
             body: [
               {
@@ -1443,6 +1788,8 @@ describe("SpecParser", () => {
             ],
           },
           "$",
+          {},
+          [],
         ]);
 
       const filter = ["get /hello"];
@@ -1507,7 +1854,7 @@ describe("SpecParser", () => {
         .returns([
           {
             type: "AdaptiveCard",
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
             version: "1.5",
             body: [
               {
@@ -1518,6 +1865,8 @@ describe("SpecParser", () => {
             ],
           },
           "$",
+          {},
+          [],
         ]);
 
       const filter = ["get /hello"];
@@ -1621,7 +1970,7 @@ describe("SpecParser", () => {
         .returns([
           {
             type: "AdaptiveCard",
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
             version: "1.5",
             body: [
               {
@@ -1632,6 +1981,8 @@ describe("SpecParser", () => {
             ],
           },
           "$",
+          {},
+          [],
         ]);
 
       const filter = ["get /hello", "post /hello"];
@@ -1732,7 +2083,7 @@ describe("SpecParser", () => {
         .returns([
           {
             type: "AdaptiveCard",
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
             version: "1.5",
             body: [
               {
@@ -1743,6 +2094,8 @@ describe("SpecParser", () => {
             ],
           },
           "$",
+          {},
+          [],
         ]);
 
       const filter = ["get /hello", "post /hello"];
@@ -1848,7 +2201,7 @@ describe("SpecParser", () => {
         .returns([
           {
             type: "AdaptiveCard",
-            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            $schema: "https://adaptivecards.io/schemas/adaptive-card.json",
             version: "1.5",
             body: [
               {
@@ -1859,6 +2212,8 @@ describe("SpecParser", () => {
             ],
           },
           "$",
+          {},
+          [],
         ]);
 
       const filter = ["get /hello", "post /hello"];
@@ -3250,6 +3605,251 @@ describe("SpecParser", () => {
           },
         },
       });
+    });
+  });
+
+  describe("generateAdaptiveCardInPlugin", () => {
+    it("should generate adaptive card in plugin", async () => {
+      const pluginManifest = {
+        schema_version: "1",
+        name_for_human: "test",
+        description_for_human: "test",
+        functions: [
+          {
+            name: "hello",
+          },
+        ],
+      };
+      const specParser = new SpecParser("path/to/spec.yaml", {
+        isGptPlugin: true,
+        allowAPIKeyAuth: false,
+        projectType: ProjectType.Copilot,
+        allowMethods: ["get"],
+        allowResponseSemantics: true,
+        allowConversationStarters: true,
+      });
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              operationId: "hello",
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      sinon.stub(specParser.parser, "dereference").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns(spec as any);
+      const outputJSONStub = sinon.stub(fs, "outputJSON").callsFake((path, data) => {
+        if (path === "pluginFilePath") {
+          expect(data.functions).to.not.be.undefined;
+          expect(data.functions[0].capabilities).to.not.be.undefined;
+          expect(data.functions[0].capabilities.response_semantics).to.not.be.undefined;
+        }
+      });
+      sinon.stub(fs, "readJSON").resolves(pluginManifest);
+
+      const filter = ["get /hello"];
+      await specParser.generateAdaptiveCardInPlugin("pluginFilePath", filter, undefined);
+    });
+
+    it("should not add ac if no openeration id found in plugin manifest", async () => {
+      const pluginManifest = {
+        schema_version: "1",
+        name_for_human: "test",
+        description_for_human: "test",
+        functions: [
+          {
+            name: "hello2",
+          },
+        ],
+      };
+      const specParser = new SpecParser("path/to/spec.yaml", {
+        isGptPlugin: true,
+        allowAPIKeyAuth: false,
+        projectType: ProjectType.Copilot,
+        allowMethods: ["get"],
+        allowResponseSemantics: true,
+        allowConversationStarters: true,
+      });
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              operationId: "hello",
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns(spec as any);
+      sinon.stub(specParser.parser, "dereference").resolves(spec as any);
+      const outputJSONStub = sinon.stub(fs, "outputJSON").callsFake((path, data) => {
+        if (path === "pluginFilePath") {
+          expect(data.functions).to.not.be.undefined;
+          expect(data.functions[0].capabilities).to.be.undefined;
+        }
+      });
+      sinon.stub(fs, "readJSON").resolves(pluginManifest);
+
+      const filter = ["get /hello"];
+      await specParser.generateAdaptiveCardInPlugin("pluginFilePath", filter, undefined);
+    });
+
+    it("should not generate ac if allowResponseSemantics is false", async () => {
+      const pluginManifest = {
+        schema_version: "1",
+        name_for_human: "test",
+        description_for_human: "test",
+        functions: [
+          {
+            name: "hello",
+          },
+        ],
+      };
+      const specParser = new SpecParser("path/to/spec.yaml", {
+        isGptPlugin: true,
+        allowAPIKeyAuth: false,
+        projectType: ProjectType.Copilot,
+        allowMethods: ["get"],
+        allowResponseSemantics: false,
+        allowConversationStarters: true,
+      });
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              operationId: "hello",
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns(spec as any);
+      const outputJSONStub = sinon.stub(fs, "outputJSON").callsFake((path, data) => {
+        if (path === "pluginFilePath") {
+          expect(data.functions).to.not.be.undefined;
+          expect(data.functions[0].capabilities).to.be.undefined;
+        }
+      });
+      sinon.stub(fs, "readJSON").resolves(pluginManifest);
+
+      const filter = ["get /hello"];
+      await specParser.generateAdaptiveCardInPlugin("pluginFilePath", filter, undefined);
+    });
+
+    it("should throw error if failed to generate ac", async () => {
+      const pluginManifest = {
+        schema_version: "1",
+        name_for_human: "test",
+        description_for_human: "test",
+        functions: [
+          {
+            name: "hello",
+          },
+        ],
+      };
+      const specParser = new SpecParser("path/to/spec.yaml", {
+        isGptPlugin: true,
+        allowAPIKeyAuth: false,
+        projectType: ProjectType.Copilot,
+        allowMethods: ["get"],
+        allowResponseSemantics: true,
+        allowConversationStarters: true,
+      });
+      const spec = {
+        openapi: "3.0.0",
+        paths: {
+          "/hello": {
+            get: {
+              operationId: "hello",
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        properties: {
+                          name: {
+                            type: "string",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+      const parseStub = sinon.stub(specParser.parser, "parse").resolves(spec as any);
+      const specFilterStub = sinon.stub(SpecFilter, "specFilter").returns(spec as any);
+      sinon.stub(specParser.parser, "dereference").resolves(spec as any);
+      const generateAdaptiveCardStub = sinon
+        .stub(AdaptiveCardGenerator, "generateAdaptiveCard")
+        .throws(new Error("generate ac error"));
+      sinon.stub(fs, "readJSON").resolves(pluginManifest);
+
+      const filter = ["get /hello"];
+      try {
+        await specParser.generateAdaptiveCardInPlugin("pluginFilePath", filter, undefined);
+      } catch (err: any) {
+        expect(err).to.be.instanceOf(SpecParserError);
+        expect(err.errorType).to.equal(ErrorType.GenerateAdaptiveCardFailed);
+        expect(err.message).to.equal("Error: generate ac error");
+      }
     });
   });
 });

@@ -22,11 +22,14 @@ async function repairs(req, context) {
     };
   }
 
+  // Get the repair records from the data.json file.
+  const repairRecords = require("../repairsData.json");
+
   // Initialize response.
   const res = {
     status: 200,
     jsonBody: {
-      results: [],
+      results: repairRecords,
     },
   };
 
@@ -37,9 +40,6 @@ async function repairs(req, context) {
   if (!assignedTo) {
     return res;
   }
-
-  // Get the repair records from the data.json file.
-  const repairRecords = require("../repairsData.json");
 
   // Filter the repair records by the assignedTo query parameter.
   const repairs = repairRecords.filter((item) => {
@@ -62,7 +62,7 @@ async function repairs(req, context) {
  * @param req - The HTTP request.
  */
 function isApiKeyValid(req) {
-  const apiKey = req.headers.get("Authorization")?.replace("Bearer ", "").trim();
+  const apiKey = req.headers.get("X-API-Key")?.trim();
   return apiKey === process.env.API_KEY;
 }
 

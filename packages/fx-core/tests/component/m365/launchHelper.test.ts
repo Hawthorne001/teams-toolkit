@@ -9,11 +9,13 @@ import { NotExtendedToM365Error } from "../../../src/component/m365/errors";
 import { LaunchHelper } from "../../../src/component/m365/launchHelper";
 import { PackageService } from "../../../src/component/m365/packageService";
 import { HubTypes } from "../../../src/question";
-import { MockM365TokenProvider } from "../../core/utils";
 import { outlookCopilotAppId } from "../../../src/component/m365/constants";
+import { MockedM365Provider } from "../../core/utils";
+import mockedEnv, { RestoreFn } from "mocked-env";
+import { FeatureFlagName } from "../../../src";
 
 describe("LaunchHelper", () => {
-  const m365TokenProvider = new MockM365TokenProvider();
+  const m365TokenProvider = new MockedM365Provider();
   const launchHelper = new LaunchHelper(m365TokenProvider);
 
   afterEach(() => {
@@ -44,7 +46,7 @@ describe("LaunchHelper", () => {
       chai.assert(result.isOk());
       chai.assert.equal(
         (result as any).value,
-        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&appTenantId=test-tid&login_hint=test-upn"
+        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&tenantId=test-tid&appTenantId=test-tid&login_hint=test-upn"
       );
     });
 
@@ -71,7 +73,7 @@ describe("LaunchHelper", () => {
       chai.assert(result.isOk());
       chai.assert.equal(
         (result as any).value,
-        "https://teams.microsoft.com/?appTenantId=test-tid&login_hint=test-upn"
+        "https://teams.microsoft.com/?tenantId=test-tid&appTenantId=test-tid&login_hint=test-upn"
       );
     });
 
@@ -98,7 +100,7 @@ describe("LaunchHelper", () => {
       chai.assert(result.isOk());
       chai.assert.equal(
         (result as any).value,
-        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&appTenantId=test-tid&login_hint=test-upn"
+        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&tenantId=test-tid&appTenantId=test-tid&login_hint=test-upn"
       );
     });
 
@@ -125,7 +127,7 @@ describe("LaunchHelper", () => {
       chai.assert(result.isOk());
       chai.assert.equal(
         (result as any).value,
-        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&appTenantId=test-tid&login_hint=test-upn"
+        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&tenantId=test-tid&appTenantId=test-tid&login_hint=test-upn"
       );
     });
 
@@ -152,7 +154,7 @@ describe("LaunchHelper", () => {
       chai.assert(result.isOk());
       chai.assert.equal(
         (result as any).value,
-        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&appTenantId=test-tid&login_hint=test-upn"
+        "https://teams.microsoft.com/l/app/test-id?installAppPackage=true&webjoin=true&tenantId=test-tid&appTenantId=test-tid&login_hint=test-upn"
       );
     });
 

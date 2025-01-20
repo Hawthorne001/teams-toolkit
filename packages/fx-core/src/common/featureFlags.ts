@@ -12,10 +12,7 @@ export function isFeatureFlagEnabled(featureFlagName: string, defaultValue = fal
 }
 export class FeatureFlagName {
   static readonly CLIDotNet = "TEAMSFX_CLI_DOTNET";
-  static readonly OfficeAddin = "TEAMSFX_OFFICE_ADDIN";
-  static readonly CopilotExtension = "DEVELOP_COPILOT_EXTENSION";
-  static readonly CopilotPlugin = "DEVELOP_COPILOT_PLUGIN";
-  static readonly DeclarativeCopilot = "TEAMSFX_DECLARATIVE_COPILOT";
+  static readonly OfficeMetaOS = "TEAMSFX_OFFICE_METAOS";
   static readonly SampleConfigBranch = "TEAMSFX_SAMPLE_CONFIG_BRANCH";
   static readonly TestTool = "TEAMSFX_TEST_TOOL";
   static readonly METestTool = "TEAMSFX_ME_TEST_TOOL";
@@ -24,12 +21,16 @@ export class FeatureFlagName {
   static readonly AsyncAppValidation = "TEAMSFX_ASYNC_APP_VALIDATION";
   static readonly NewProjectType = "TEAMSFX_NEW_PROJECT_TYPE";
   static readonly ChatParticipant = "TEAMSFX_CHAT_PARTICIPANT";
+  static readonly ChatParticipantUIEntries = "TEAMSFX_CHAT_PARTICIPANT_ENTRIES";
   static readonly SMEOAuth = "SME_OAUTH";
   static readonly ShowDiagnostics = "TEAMSFX_SHOW_DIAGNOSTICS";
   static readonly TelemetryTest = "TEAMSFX_TELEMETRY_TEST";
   static readonly DevTunnelTest = "TEAMSFX_DEV_TUNNEL_TEST";
-  static readonly EnvFileFunc = "TEAMSFX_ENV_FILE_FUNC";
+  static readonly SyncManifest = "TEAMSFX_SYNC_MANIFEST";
+  static readonly KiotaIntegration = "TEAMSFX_KIOTA_INTEGRATION";
+  static readonly CEAEnabled = "TEAMSFX_CEA_ENABLED";
 }
+
 export interface FeatureFlag {
   name: string;
   defaultValue: string;
@@ -38,21 +39,12 @@ export interface FeatureFlag {
 
 export class FeatureFlags {
   static readonly CLIDotNet = { name: FeatureFlagName.CLIDotNet, defaultValue: "false" };
-  static readonly CopilotExtension = {
-    name: FeatureFlagName.CopilotExtension,
-    defaultValue: "false",
-  };
-  static readonly CopilotPlugin = {
-    name: FeatureFlagName.CopilotPlugin,
-    defaultValue: "false",
-  }; // old feature flag. Keep it for backwards compatibility.
-  static readonly DeclarativeCopilot = {
-    name: FeatureFlagName.DeclarativeCopilot,
-    defaultValue: "false",
-  }; // old feature flag. Keep it for backwards compatibility.
   static readonly TestTool = { name: FeatureFlagName.TestTool, defaultValue: "true" };
   static readonly METestTool = { name: FeatureFlagName.METestTool, defaultValue: "true" };
-  static readonly OfficeAddin = { name: FeatureFlagName.OfficeAddin, defaultValue: "false" };
+  static readonly OfficeMetaOS = {
+    name: FeatureFlagName.OfficeMetaOS,
+    defaultValue: "false",
+  };
   static readonly TdpTemplateCliTest = {
     name: FeatureFlagName.TdpTemplateCliTest,
     defaultValue: "false",
@@ -64,6 +56,10 @@ export class FeatureFlags {
   static readonly NewProjectType = { name: FeatureFlagName.NewProjectType, defaultValue: "true" };
   static readonly ChatParticipant = {
     name: FeatureFlagName.ChatParticipant,
+    defaultValue: "false",
+  };
+  static readonly ChatParticipantUIEntries = {
+    name: FeatureFlagName.ChatParticipantUIEntries,
     defaultValue: "false",
   };
   static readonly SMEOAuth = { name: FeatureFlagName.SMEOAuth, defaultValue: "false" };
@@ -79,18 +75,18 @@ export class FeatureFlags {
     name: FeatureFlagName.DevTunnelTest,
     defaultValue: "false",
   };
-  static readonly EnvFileFunc = {
-    name: FeatureFlagName.EnvFileFunc,
-    defaultValue: "true", // Set it to true for dogfooding.
+  static readonly SyncManifest = {
+    name: FeatureFlagName.SyncManifest,
+    defaultValue: "false",
   };
-}
-
-export function isCopilotExtensionEnabled(): boolean {
-  return (
-    featureFlagManager.getBooleanValue(FeatureFlags.CopilotExtension) ||
-    featureFlagManager.getBooleanValue(FeatureFlags.CopilotPlugin) ||
-    featureFlagManager.getBooleanValue(FeatureFlags.DeclarativeCopilot)
-  );
+  static readonly KiotaIntegration = {
+    name: FeatureFlagName.KiotaIntegration,
+    defaultValue: "false",
+  };
+  static readonly CEAEnabled = {
+    name: FeatureFlagName.CEAEnabled,
+    defaultValue: "false",
+  };
 }
 
 export class FeatureFlagManager {

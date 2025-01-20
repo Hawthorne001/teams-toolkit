@@ -14,7 +14,7 @@ export interface CreateProjectInputs extends Inputs {
   /** @description Teams Toolkit: select runtime for your app */
   runtime?: "node" | "dotnet";
   /** @description New Project */
-  "project-type"?: "bot-type" | "tab-type" | "me-type" | "office-addin-type" | "outlook-addin-type";
+  "project-type"?: "bot-type" | "tab-type" | "me-type" | "outlook-addin-type";
   /** @description Capabilities */
   capabilities?:
     | "empty"
@@ -30,8 +30,7 @@ export interface CreateProjectInputs extends Inputs {
     | "collect-form-message-extension"
     | "search-message-extension"
     | "link-unfurling"
-    | "api-plugin"
-    | "declarative-copilot"
+    | "declarative-agent"
     | "custom-copilot-basic"
     | "custom-copilot-rag"
     | "custom-copilot-agent"
@@ -42,7 +41,7 @@ export interface CreateProjectInputs extends Inputs {
     | "office-content-addin";
   /** @description Select triggers */
   "bot-host-type-trigger"?:
-    | "http-restify"
+    | "http-express"
     | "http-webapi"
     | "http-and-timer-functions"
     | "http-functions"
@@ -58,13 +57,17 @@ export interface CreateProjectInputs extends Inputs {
   /** @description SPFx solution folder */
   "spfx-folder"?: string;
   /** @description Architecture of Search Based Message Extension */
-  "me-architecture"?: "new-api" | "api-spec" | "bot-plugin" | "bot";
-  /** @description Create Declarative Copilot */
+  "me-architecture"?: "new-api" | "api-spec" | "bot";
+  /** @description Create Declarative Agent */
   "with-plugin"?: "no" | "yes";
   /** @description Create API Plugin */
-  "api-plugin-type"?: "new-api" | "api-spec";
+  "api-plugin-type"?: "new-api" | "api-spec" | "existing-plugin";
+  /** @description Import Manifest File */
+  "plugin-manifest-path"?: string;
+  /** @description Import OpenAPI Description Document */
+  "plugin-opeanapi-spec-path"?: string;
   /** @description Authentication Type */
-  "api-auth"?: "none" | "api-key" | "microsoft-entra" | "oauth";
+  "api-auth"?: "none" | "api-key" | "bearer-token" | "microsoft-entra" | "oauth";
   /** @description Chat With Your Data */
   "custom-copilot-rag"?:
     | "custom-copilot-rag-customize"
@@ -89,8 +92,6 @@ export interface CreateProjectInputs extends Inputs {
   "azure-openai-deployment-name"?: string;
   /** @description OpenAI Key */
   "openai-key"?: string;
-  /** @description Framework */
-  "office-addin-framework-type"?: "default" | "react";
   /** @description Application Name */
   "app-name"?: string;
 }

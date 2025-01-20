@@ -1,7 +1,7 @@
-# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.5/yaml.schema.json
+# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.7/yaml.schema.json
 # Visit https://aka.ms/teamsfx-v5.0-guide for details on this file
 # Visit https://aka.ms/teamsfx-actions for details on actions
-version: v1.5
+version: v1.7
 
 provision:
   # Creates a Teams app
@@ -73,7 +73,7 @@ provision:
       # Path to manifest template
       manifestPath: ./appPackage/manifest.json
       outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
-      outputJsonPath: ./appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+      outputFolder: ./appPackage/build
 
   # Validate app package using validation rules
   - uses: teamsApp/validateAppPackage
@@ -107,6 +107,7 @@ provision:
       target: ./Properties/launchSettings.json
       content:
         profiles:
+        {{^DeclarativeCopilot}}
           Microsoft 365 app (browser):
             commandName: "Project"
             dotnetRunMessages: true
@@ -124,4 +125,11 @@ provision:
             environmentVariables:
               ASPNETCORE_ENVIRONMENT: "Development"
             hotReloadProfile: "aspnetcore"
+        {{/DeclarativeCopilot}}
+        {{#DeclarativeCopilot}}
+          "Copilot (browser)": {
+            "commandName": "Project",
+            "launchUrl": "https://m365.cloud.microsoft/chat/entity1-d870f6cd-4aa5-4d42-9626-ab690c041429/${{AGENT_HINT}}?auth=2"
+          }
+        {{/DeclarativeCopilot}}
 {{/isNewProjectTypeEnabled}}

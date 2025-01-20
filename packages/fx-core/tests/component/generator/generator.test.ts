@@ -52,6 +52,7 @@ import { ActionContext } from "../../../src/component/middleware/actionExecution
 import { CapabilityOptions, ProgrammingLanguage, QuestionNames } from "../../../src/question";
 import sampleConfigV3 from "../../common/samples-config-v3.json";
 import { MockTools, randomAppName } from "../../core/utils";
+import { getLocalizedString } from "../../../src/common/localizeUtils";
 
 const mockedSampleInfo: SampleConfig = {
   id: "test-id",
@@ -107,7 +108,7 @@ describe("Generator utils", () => {
   afterEach(async () => {
     sandbox.restore();
     if (await fs.pathExists(tmpDir)) {
-      await fs.rm(tmpDir, { recursive: true });
+      await fs.remove(tmpDir);
     }
     mockedEnvRestore();
   });
@@ -521,7 +522,7 @@ describe("Generator error", async () => {
 
   afterEach(async () => {
     if (await fs.pathExists(tmpDir)) {
-      await fs.rm(tmpDir, { recursive: true });
+      await fs.remove(tmpDir);
     }
     sandbox.restore();
   });
@@ -707,6 +708,39 @@ describe("render template", () => {
     assert.equal(result2, expectedResult2);
   });
 
+  it("should render array element", () => {
+    const filename = "test.tpl";
+    const fileData = Buffer.from("{{#person}}{{name}},{{email}}{{/person}}");
+    const variables1 = {
+      person: [
+        { name: "name1", email: "email1" },
+        { name: "name2", email: "email2" },
+      ],
+    };
+    const expectedResult1 = "name1,email1name2,email2";
+
+    // execute
+    const result1 = renderTemplateFileData(filename, fileData, variables1 as any);
+
+    // assert
+    assert.equal(result1, expectedResult1);
+  });
+
+  it("should render object element", () => {
+    const filename = "test.tpl";
+    const fileData = Buffer.from("{{#person}}{{name}},{{email}}{{/person}}");
+    const variables1 = {
+      person: { name: "name1", email: "email1" },
+    };
+    const expectedResult1 = "name1,email1";
+
+    // execute
+    const result1 = renderTemplateFileData(filename, fileData, variables1 as any);
+
+    // assert
+    assert.equal(result1, expectedResult1);
+  });
+
   it("do not escape empty string variable", () => {
     // arrange
     const filename = "test.tpl";
@@ -784,7 +818,7 @@ describe("render template", () => {
     afterEach(async () => {
       sandbox.restore();
       if (await fs.pathExists(tmpDir)) {
-        await fs.rm(tmpDir, { recursive: true });
+        await fs.remove(tmpDir);
       }
       mockedEnvRestore();
     });
@@ -941,50 +975,85 @@ describe("render template", () => {
       assert.equal(vars.azureOpenAIDeploymentName, "test-deployment");
     });
 
+    it("template variables with custom copilot - AI Search for csharp", async () => {
+      inputs.projectId = "test-id";
+      inputs[QuestionNames.AzureOpenAIKey] = "test-key";
+      inputs[QuestionNames.AzureAISearchApiKey] = "test-search-key";
+      inputs[QuestionNames.AzureAISearchEndpoint] = "test-search-endpoint";
+      inputs[QuestionNames.OpenAIEmbeddingModel] = "test-openai-embedding-model";
+      inputs[QuestionNames.AzureOpenAIEmbeddingDeploymentName] = "test-azure-embedding-deployment";
+      const vars = getTemplateReplaceMap(inputs);
+      assert.isTrue(vars.azureAISearchApiKey.startsWith("crypto_"));
+      assert.equal(vars.azureAISearchEndpoint, "test-search-endpoint");
+      assert.equal(vars.openAIEmbeddingModel, "test-openai-embedding-model");
+      assert.equal(vars.azureOpenAIEmbeddingDeploymentName, "test-azure-embedding-deployment");
+    });
+
     it("template variables when contains auth", async () => {
       sandbox.stub(process, "env").value({ TEAMSFX_TEST_TOOL: "false" });
-      const vars = Generator.getDefaultVariables("Test", "Test", "net6", false, {
-        authName: "authName",
-        openapiSpecPath: "path/to/spec.yaml",
-        registrationIdEnvName: "AUTHNAME_REGISTRATION_ID",
-      });
+      const vars = Generator.getDefaultVariables("Test", "Test", "net6", false, [
+        {
+          authName: "authName",
+          openapiSpecPath: "path/to/spec.yaml",
+          registrationIdEnvName: "AUTHNAME_REGISTRATION_ID",
+          authType: "apiKey",
+        },
+      ]);
       assert.equal(vars.enableTestToolByDefault, "");
       assert.equal(vars.appName, "Test");
-      assert.equal(vars.ApiSpecAuthName, "authName");
-      assert.equal(vars.ApiSpecPath, "path/to/spec.yaml");
-      assert.equal(vars.ApiSpecAuthRegistrationIdEnvName, "AUTHNAME_REGISTRATION_ID");
+      assert.equal(vars.ApiKey[0].ApiSpecAuthName, "authName");
+      assert.equal(vars.ApiKey[0].ApiSpecPath, "path/to/spec.yaml");
+      assert.equal(vars.ApiKey[0].ApiSpecAuthRegistrationIdEnvName, "AUTHNAME_REGISTRATION_ID");
       assert.equal(vars.SafeProjectName, "Test");
       assert.equal(vars.SafeProjectNameLowerCase, "test");
     });
 
     it("template variables when contains auth with special characters", async () => {
       sandbox.stub(process, "env").value({ TEAMSFX_TEST_TOOL: "false" });
-      const vars = Generator.getDefaultVariables("Test", "Test", "net6", false, {
-        authName: "authName",
-        openapiSpecPath: "path/to/spec.yaml",
-        registrationIdEnvName: "AUTH-NAME_REGISTRATION*ID",
-      });
+      const vars = Generator.getDefaultVariables("Test", "Test", "net6", false, [
+        {
+          authName: "authName",
+          openapiSpecPath: "path/to/spec.yaml",
+          registrationIdEnvName: "AUTH-NAME_REGISTRATION*ID",
+          authType: "oauth2",
+        },
+        {
+          authName: "authName2",
+          openapiSpecPath: "path/to/spec.yaml",
+          registrationIdEnvName: "AUTH-NAME2_REGISTRATION*ID",
+          authType: "apiKey",
+        },
+      ]);
       assert.equal(vars.enableTestToolByDefault, "");
       assert.equal(vars.appName, "Test");
-      assert.equal(vars.ApiSpecAuthName, "authName");
-      assert.equal(vars.ApiSpecPath, "path/to/spec.yaml");
-      assert.equal(vars.ApiSpecAuthRegistrationIdEnvName, "AUTH_NAME_REGISTRATION_ID");
+      assert.equal(vars.OAuth[0].ApiSpecAuthName, "authName");
+      assert.equal(vars.OAuth[0].ApiSpecPath, "path/to/spec.yaml");
+      assert.equal(vars.OAuth[0].ApiSpecAuthRegistrationIdEnvName, "AUTH_NAME_REGISTRATION_ID");
+      assert.equal(vars.ApiKey[0].ApiSpecAuthName, "authName2");
+      assert.equal(vars.ApiKey[0].ApiSpecPath, "path/to/spec.yaml");
+      assert.equal(vars.ApiKey[0].ApiSpecAuthRegistrationIdEnvName, "AUTH_NAME2_REGISTRATION_ID");
       assert.equal(vars.SafeProjectName, "Test");
       assert.equal(vars.SafeProjectNameLowerCase, "test");
     });
 
     it("template variables when contains auth with name not start with [A-Z]", async () => {
       sandbox.stub(process, "env").value({ TEAMSFX_TEST_TOOL: "false" });
-      const vars = Generator.getDefaultVariables("Test", "Test", undefined, false, {
-        authName: "authName",
-        openapiSpecPath: "path/to/spec.yaml",
-        registrationIdEnvName: "*AUTH-NAME_REGISTRATION*ID",
-      });
+      const vars = Generator.getDefaultVariables("Test", "Test", undefined, false, [
+        {
+          authName: "authName",
+          openapiSpecPath: "path/to/spec.yaml",
+          registrationIdEnvName: "*AUTH-NAME_REGISTRATION*ID",
+          authType: "apiKey",
+        },
+      ]);
       assert.equal(vars.enableTestToolByDefault, "");
       assert.equal(vars.appName, "Test");
-      assert.equal(vars.ApiSpecAuthName, "authName");
-      assert.equal(vars.ApiSpecPath, "path/to/spec.yaml");
-      assert.equal(vars.ApiSpecAuthRegistrationIdEnvName, "PREFIX__AUTH_NAME_REGISTRATION_ID");
+      assert.equal(vars.ApiKey[0].ApiSpecAuthName, "authName");
+      assert.equal(vars.ApiKey[0].ApiSpecPath, "path/to/spec.yaml");
+      assert.equal(
+        vars.ApiKey[0].ApiSpecAuthRegistrationIdEnvName,
+        "PREFIX__AUTH_NAME_REGISTRATION_ID"
+      );
       assert.equal(vars.SafeProjectName, "Test");
       assert.equal(vars.SafeProjectNameLowerCase, "test");
     });
@@ -1160,6 +1229,39 @@ describe("render template", () => {
         `${templateName}-${commonTemplateName}`
       );
     });
+
+    it("template variables when CEA enabled", async () => {
+      sandbox.stub(process, "env").value({ TEAMSFX_CEA_ENABLED: "true" });
+      const vars = newGeneratorFlag
+        ? getTemplateReplaceMap(inputs)
+        : Generator.getDefaultVariables("test");
+      assert.equal(vars.CEAEnabled, "true");
+    });
+
+    it("template variables when CEA disabled", async () => {
+      sandbox.stub(process, "env").value({ TEAMSFX_CEA_ENABLED: "false" });
+      const vars = newGeneratorFlag
+        ? getTemplateReplaceMap(inputs)
+        : Generator.getDefaultVariables("test");
+      assert.equal(vars.CEAEnabled, "");
+    });
+
+    it("CEA works in M365 tag shows when CEA enabled", async () => {
+      sandbox.stub(process, "env").value({ TEAMSFX_CEA_ENABLED: "true" });
+      const descriptionAnswer = getLocalizedString(
+        "core.createProjectQuestion.capability.customEngineAgent.description"
+      );
+      assert.equal(CapabilityOptions.customCopilotBasic().description, descriptionAnswer);
+      assert.equal(CapabilityOptions.customCopilotRag().description, descriptionAnswer);
+      assert.equal(CapabilityOptions.customCopilotAssistant().description, descriptionAnswer);
+    });
+
+    it("CEA works in M365 tag doesn't show when CEA disabled", async () => {
+      sandbox.stub(process, "env").value({ TEAMSFX_CEA_ENABLED: "false" });
+      assert.equal(CapabilityOptions.customCopilotBasic().description, undefined);
+      assert.equal(CapabilityOptions.customCopilotRag().description, undefined);
+      assert.equal(CapabilityOptions.customCopilotAssistant().description, undefined);
+    });
   });
 });
 
@@ -1181,7 +1283,7 @@ describe("Generate sample using download directory", () => {
     sandbox.restore();
     mockedEnvRestore();
     if (await fs.pathExists(tmpDir)) {
-      await fs.rm(tmpDir, { recursive: true });
+      await fs.remove(tmpDir);
     }
   });
 
@@ -1250,7 +1352,7 @@ describe("Generate sample using download directory", () => {
   });
 
   it("clean up if downloading failed", async () => {
-    const rmStub = sandbox.stub(fs, "rm").resolves();
+    const rmStub = sandbox.stub(fs, "remove").resolves();
     const existsStub = sandbox.stub(fs, "pathExists").resolves(true);
     sandbox.stub(generatorUtils, "downloadDirectory").rejects();
     const result = await Generator.generateSample(ctx, tmpDir, "test");

@@ -1,7 +1,7 @@
-# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.6/yaml.schema.json
+# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.7/yaml.schema.json
 # Visit https://aka.ms/teamsfx-v5.0-guide for details on this file
 # Visit https://aka.ms/teamsfx-actions for details on actions
-version: v1.6
+version: v1.7
 
 environmentFolderPath: ./env
 
@@ -92,7 +92,7 @@ provision:
       appId: ${{TEAMS_APP_ID}}
       clientId: ${{AAD_APP_CLIENT_ID}}
       # Path to OpenAPI description document
-      apiSpecPath: ./appPackage/apiSpecificationFile/repair.${{TEAMSFX_ENV}}.yml
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
       identityProvider: MicrosoftEntra
     writeToEnvironmentFile:
       configurationId: AADAUTHCODE_CONFIGURATION_ID
@@ -104,7 +104,7 @@ provision:
       clientId: ${{AAD_APP_CLIENT_ID}}
       clientSecret: ${{SECRET_AAD_APP_CLIENT_SECRET}}
       # Path to OpenAPI description document
-      apiSpecPath: ./appPackage/apiSpecificationFile/repair.${{TEAMSFX_ENV}}.yml
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
     writeToEnvironmentFile:
       configurationId: OAUTH2AUTHCODE_CONFIGURATION_ID
 {{/MicrosoftEntra}}
@@ -115,7 +115,7 @@ provision:
       # Path to manifest template
       manifestPath: ./appPackage/manifest.json
       outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
-      outputJsonPath: ./appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+      outputFolder: ./appPackage/build
 
   # Validate app package using validation rules
   - uses: teamsApp/validateAppPackage

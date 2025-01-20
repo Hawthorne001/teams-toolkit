@@ -42,7 +42,12 @@ to install the app to.
 
 ## Learn more
 
-- [Extend Microsoft Copilot for Microsoft 365](https://aka.ms/teamsfx-copilot-plugin)
+{{^DeclarativeCopilot}}
+- [Extend Microsoft 365 Copilot](https://aka.ms/teamsfx-copilot-plugin)
+{{/DeclarativeCopilot}}
+{{#DeclarativeCopilot}}
+- [Declarative agents for Microsoft 365](https://aka.ms/teams-toolkit-declarative-agent)
+{{/DeclarativeCopilot}}
 
 ## Report an issue
 

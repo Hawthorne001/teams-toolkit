@@ -15,12 +15,8 @@ import {
   OauthRegistrationAppType,
   OauthRegistrationTargetAudience,
 } from "../../../../src/component/driver/teamsApp/interfaces/OauthRegistration";
-import {
-  MockedAzureAccountProvider,
-  MockedLogProvider,
-  MockedM365Provider,
-  MockedUserInteraction,
-} from "../../../plugins/solution/util";
+import { MockedLogProvider, MockedUserInteraction } from "../../../plugins/solution/util";
+import { MockedAzureAccountProvider, MockedM365Provider } from "../../../core/utils";
 
 chai.use(chaiAsPromised);
 const expect = chai.expect;
@@ -81,6 +77,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -152,6 +149,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -217,6 +215,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -258,10 +257,13 @@ describe("CreateOauthDriver", () => {
       flow: "authorizationCode",
       identityProvider: "MicrosoftEntra",
     };
-    const result = await createOauthDriver.execute(args, mockedDriverContext, outputEnvVarNames);
+    const outputEnvVarNamesTmp = new Map<string, string>(Object.entries(outputKeys));
+    outputEnvVarNamesTmp.set("applicationIdUri", "APPLICATION_ID_URI");
+    const result = await createOauthDriver.execute(args, mockedDriverContext, outputEnvVarNamesTmp);
     expect(result.result.isOk()).to.be.true;
     if (result.result.isOk()) {
       expect(result.result.value.get(outputKeys.configurationId)).to.equal("mockedRegistrationId");
+      expect(result.result.value.get("APPLICATION_ID_URI")).to.equal("mockedResourceIdentifierUri");
       expect(result.summaries.length).to.equal(1);
     }
   });
@@ -283,6 +285,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -333,6 +336,80 @@ describe("CreateOauthDriver", () => {
     }
   });
 
+  it("happy path: read clientSecret, refreshurl from input with invalid api", async () => {
+    sinon
+      .stub(teamsDevPortalClient, "createOauthRegistration")
+      .callsFake(async (token, oauthRegistration) => {
+        expect(oauthRegistration.clientId).to.equals("mockedClientId");
+        expect(oauthRegistration.clientSecret).to.equals("mockedClientSecret");
+        expect(oauthRegistration.description).to.equals("test");
+        expect(oauthRegistration.authorizationEndpoint).to.equals("mockedAuthorizationUrl");
+        expect(oauthRegistration.scopes[0]).to.equals("mockedScope");
+        expect(oauthRegistration.targetUrlsShouldStartWith[0]).to.equals("https://test");
+        expect(oauthRegistration.tokenExchangeEndpoint).to.equals("mockedTokenUrl");
+        expect(oauthRegistration.tokenRefreshEndpoint).to.equal("mockedRefreshUrl");
+        expect(oauthRegistration.applicableToApps).to.equals(OauthRegistrationAppType.AnyApp);
+        expect(oauthRegistration.isPKCEEnabled).to.be.false;
+        expect(oauthRegistration.targetAudience).to.equals(
+          OauthRegistrationTargetAudience.AnyTenant
+        );
+        expect(oauthRegistration.m365AppId).to.equal("");
+        expect(oauthRegistration.identityProvider).to.equal("Custom");
+        return {
+          configurationRegistrationId: {
+            oAuthConfigId: "mockedRegistrationId",
+          },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
+        };
+      });
+    sinon.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "api",
+          server: "https://test",
+          operationId: "get",
+          auth: {
+            name: "test",
+            authScheme: {
+              type: "oauth2",
+              flows: {
+                authorizationCode: {
+                  authorizationUrl: "mockedAuthorizationUrl",
+                  tokenUrl: "mockedTokenUrl",
+                  scopes: {
+                    mockedScope: "description for mocked scope",
+                  },
+                },
+              },
+            },
+          },
+          isValid: false,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+
+    const args: any = {
+      name: "test",
+      appId: "mockedAppId",
+      apiSpecPath: "mockedPath",
+      clientId: "mockedClientId",
+      clientSecret: "mockedClientSecret",
+      flow: "authorizationCode",
+      refreshUrl: "mockedRefreshUrl",
+      isPKCEEnabled: false,
+      identityProvider: "Custom",
+    };
+    const result = await createOauthDriver.execute(args, mockedDriverContext, outputEnvVarNames);
+    expect(result.result.isOk()).to.be.true;
+    if (result.result.isOk()) {
+      expect(result.result.value.get(outputKeys.configurationId)).to.equal("mockedRegistrationId");
+      expect(result.summaries.length).to.equal(1);
+    }
+  });
+
   it("should throw error is identityProvider is Custom but the authorization url is not Microsoft Entra endpoint", async () => {
     sinon
       .stub(teamsDevPortalClient, "createOauthRegistration")
@@ -350,6 +427,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -418,6 +496,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -490,6 +569,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -560,6 +640,7 @@ describe("CreateOauthDriver", () => {
           configurationRegistrationId: {
             oAuthConfigId: "mockedRegistrationId",
           },
+          resourceIdentifierUri: "mockedResourceIdentifierUri",
         };
       });
     sinon.stub(SpecParser.prototype, "list").resolves({
@@ -955,7 +1036,7 @@ describe("CreateOauthDriver", () => {
     const result = await createOauthDriver.execute(args, mockedDriverContext, outputEnvVarNames);
     expect(result.result.isErr()).to.be.true;
     if (result.result.isErr()) {
-      expect(result.result.error.name).to.equal("OauthFailedToGetDomain");
+      expect(result.result.error.name).to.equal("OauthAuthMissingInSpec");
     }
   });
 
@@ -966,6 +1047,76 @@ describe("CreateOauthDriver", () => {
           api: "api",
           server: "https://test",
           operationId: "get",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      validAPICount: 0,
+      allAPICount: 1,
+    });
+    const args: any = {
+      name: "test",
+      appId: "mockedAppId",
+      apiSpecPath: "mockedPath",
+      clientId: "mockedClientId",
+      clientSecret: "mockedClientSecret",
+      flow: "authorizationCode",
+      refreshUrl: "mockedRefreshUrl",
+      applicableToApps: "SpecificApp",
+      targetAudience: "HomeTenant",
+    };
+
+    const result = await createOauthDriver.execute(args, mockedDriverContext, outputEnvVarNames);
+    expect(result.result.isErr()).to.be.true;
+    if (result.result.isErr()) {
+      expect(result.result.error.name).to.equal("OauthAuthMissingInSpec");
+    }
+  });
+
+  it("should throw error if list api contains auth but server info is null ", async () => {
+    sinon.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "api",
+          server: "",
+          operationId: "get",
+          auth: {
+            name: "test",
+            authScheme: {
+              type: "oauth2",
+              flows: {
+                authorizationCode: {
+                  authorizationUrl: "mockedAuthorizationUrl",
+                  tokenUrl: "mockedTokenUrl",
+                  scopes: {
+                    mockedScope: "description for mocked scope",
+                  },
+                },
+              },
+            },
+          },
+          isValid: true,
+          reason: [],
+        },
+        {
+          api: "api",
+          server: "https://test",
+          operationId: "get2",
+          auth: {
+            name: "test2",
+            authScheme: {
+              type: "oauth2",
+              flows: {
+                authorizationCode: {
+                  authorizationUrl: "mockedAuthorizationUrl2",
+                  tokenUrl: "mockedTokenUrl2",
+                  scopes: {
+                    mockedScope2: "description for mocked scope",
+                  },
+                },
+              },
+            },
+          },
           isValid: true,
           reason: [],
         },

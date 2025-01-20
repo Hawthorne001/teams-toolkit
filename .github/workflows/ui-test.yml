@@ -112,14 +112,14 @@ jobs:
 
       - name: create pvt file (random platform/node)
         if: ${{ github.event.schedule == '0 18 * * *' }} || ${{ github.event.inputs.test-case }} == ''
-        working-directory: ./packages/tests
+        working-directory: packages/tests
         run: |
           pnpm --filter=@microsoft/teamsfx-test install
           npx ts-node ./scripts/createRandomPVT.ts
 
       - name: setup matrix
         id: setup-matrix
-        working-directory: ./packages/tests
+        working-directory: packages/tests
         run: |
           matrix=""
           if [ ! -z "${{ github.event.inputs.test-case }}" ]; then
@@ -145,7 +145,7 @@ jobs:
           echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Upload TTK to artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ttk
           path: |
@@ -192,6 +192,7 @@ jobs:
       M365_USERNAME_2: "test15@xxbdw.onmicrosoft.com"
       M365_USERNAME_3: "test16@xxbdw.onmicrosoft.com"
       M365_USERNAME_4: "test17@xxbdw.onmicrosoft.com"
+      M365_USERNAME_5: "ttktest01@xxbdw.onmicrosoft.com"
       M365_DISPLAY_NAME: "ttktest"
       M365_TENANT_ID: ${{ secrets.TEST_CLEAN_TENANT_ID }}
       M365_COLLABORATOR: "haolong@xxbdw.onmicrosoft.com"
@@ -201,6 +202,7 @@ jobs:
       AZURE_SUBSCRIPTION_NAME: ${{ secrets.TEST_SUBSCRIPTION_NAME }}
       AZURE_ACCOUNT_NAME: ${{ secrets.TEST_USER_NAME }}
       AZURE_ACCOUNT_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+      STORAGE_ACCOUNT_KEY: ${{ secrets.TEST_STORAGE_ACCOUNT_KEY }}
 
       AZURE_OPENAI_DEPLOYMENT_NAME: "gpt-4-32k"
       AZURE_OPENAI_ENDPOINT: "https://aoai-jasozdr.openai.azure.com/"
@@ -210,7 +212,7 @@ jobs:
       TEAMSFX_TELEMETRY_TEST: true
     strategy:
       fail-fast: false
-      max-parallel: 50
+      max-parallel: 80
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
@@ -231,6 +233,16 @@ jobs:
           $user=$users[$index]
           echo "account index: $index"
           echo "M365_ACCOUNT_NAME=$user" >> $env:GITHUB_ENV
+
+      - name: Set m365 account for Outlook preview (unix)
+        if: matrix.os != 'windows-latest' && contains(matrix.test-case, 'localdebug-obo-tab') == true
+        run: |
+          echo "M365_ACCOUNT_NAME=${{ env.M365_USERNAME_5 }}" >> $GITHUB_ENV
+
+      - name: Set m365 account for Outlook preview (win)
+        if: matrix.os == 'windows-latest' && contains(matrix.test-case, 'localdebug-obo-tab') == true
+        run: |          
+          echo "M365_ACCOUNT_NAME=${{ env.M365_USERNAME_5 }}" >> $env:GITHUB_ENV
       
       - name: Checkout branch
         uses: actions/checkout@v3
@@ -335,58 +347,31 @@ jobs:
           npx playwright install
 
       - name: Download TTK
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ttk
-          path: ./packages/tests
-
-      - name: Install teamsfx cli (for migration use latest)
-        if: contains(matrix.test-case,  'upgrade') && contains(matrix.test-case,  '4.0.0') == false && contains(matrix.test-case,  '3.x') == false
-        working-directory: packages/tests
-        run: |
-          npm install @microsoft/teamsfx-cli@1.2.6
-
-      - name: Install teamsfx cli (for migration use 1.0.0)
-        if: contains(matrix.test-case,  '4.0.0')
-        working-directory: packages/tests
-        run: |
-          npm install @microsoft/teamsfx-cli@1.0.0
-
-      - name: Install teamsfx cli (for migration use 0.2.0)
-        if: contains(matrix.test-case,  '3.x')
-        working-directory: packages/tests
-        run: |
-          npm install @microsoft/teamsfx-cli@0.2.0
+          path: packages/tests
 
       - name: Install teamsfx cli
-        if: contains(matrix.test-case,  'upgrade') == false
         working-directory: packages/tests
         run: |
           npm install @microsoft/teamsapp-cli@${{ needs.setup.outputs.npm-tag }}
 
-      - name: Download samples (migration use v1.1.0)
-        if: contains(matrix.test-case, 'sample-') && contains(matrix.test-case,  'upgrade')
-        uses: actions/checkout@v3
-        with:
-          repository: OfficeDev/TeamsFx-Samples
-          ref: v1.1.0
-          path: ./packages/tests/resource
-
       - name: Download samples
-        if: startsWith(matrix.test-case, 'sample-') && contains(matrix.test-case, 'proactive-message') == false && contains(matrix.test-case,  'upgrade') == false && contains(matrix.test-case, 'chef-bot') == false
+        if: startsWith(matrix.test-case, 'sample-') && contains(matrix.test-case, 'proactive-message') == false && contains(matrix.test-case, 'reddit-link') == false && contains(matrix.test-case, 'chef-bot') == false && contains(matrix.test-case, 'food-catalog') == false && contains(matrix.test-case, 'outlook-signature') == false
         uses: actions/checkout@v3
         with:
           repository: OfficeDev/TeamsFx-Samples
           ref: ${{ needs.setup.outputs.sample-ref }}
-          path: ./packages/tests/resource
+          path: packages/tests/resource
 
       - name: Download samples from another repo
-        if: contains(matrix.test-case, 'proactive-message') && contains(matrix.test-case,  'upgrade') == false
+        if: contains(matrix.test-case, 'proactive-message') || contains(matrix.test-case, 'reddit-link')
         uses: actions/checkout@v3
         with:
           repository: OfficeDev/Microsoft-Teams-Samples
           ref: main
-          path: ./packages/tests/resource
+          path: packages/tests/resource
 
       - name: Download samples chef bot
         if: contains(matrix.test-case, 'chef-bot')
@@ -394,7 +379,23 @@ jobs:
         with:
           repository: microsoft/teams-ai
           ref: main
-          path: ./packages/tests/resource
+          path: packages/tests/resource
+
+      - name: Download samples food catalog
+        if: contains(matrix.test-case, 'food-catalog')
+        uses: actions/checkout@v3
+        with:
+          repository: pnp/graph-connectors-samples
+          ref: main
+          path: packages/tests/resource
+
+      - name: Download samples outlook signature
+        if: contains(matrix.test-case, 'outlook-signature')
+        uses: actions/checkout@v3
+        with:
+          repository: OfficeDev/Office-Add-in-samples
+          ref: main
+          path: packages/tests/resource
 
       - name: Get VSCode
         working-directory: packages/tests
@@ -431,7 +432,7 @@ jobs:
         if: matrix.os != 'windows-latest'
         working-directory: packages/tests
         run: |
-          vsix=`find . -type f -name "*.vsix" | sed 's|.*/\(.*\)|\1|'`
+          vsix=`find . -maxdepth 1 -type f -name "*.vsix" | sed 's|.*/\(.*\)|\1|'`
           npx extest install-vsix --storage .test-resources --extensions_dir .test-resources --type stable --vsix_file $vsix
 
       - name: Install vsix(win)
@@ -449,12 +450,12 @@ jobs:
           value: ${{ secrets.SECRET_AZURE_OPENAI_API_KEY }}
 
       - name: Setup OpenAI key(macos)
-        if: ${{ matrix.os == 'macos-latest' && github.event_name != 'schedule' }}
+        if: ${{ matrix.os == 'macos-latest' }}
         run: |
           echo "SECRET_AZURE_OPENAI_API_KEY=${{ secrets.SECRET_AZURE_OPENAI_API_KEY }}" >> $GITHUB_ENV
 
       - name: Setup OpenAI key(win)
-        if: ${{ matrix.os == 'windows-latest' && github.event_name != 'schedule' }}
+        if: ${{ matrix.os == 'windows-latest' }}
         run: |
           echo "SECRET_AZURE_OPENAI_API_KEY=${{ secrets.SECRET_AZURE_OPENAI_API_KEY }}" >> $env:GITHUB_ENV
 
@@ -474,30 +475,30 @@ jobs:
           npx extest run-tests --storage .test-resources --extensions_dir .test-resources --type stable --code_settings ./settings.json ./out/ui-test/**/${{ matrix.test-case }}.test.js
       
       - name: Upload test result json file
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: ${{ github.event_name != 'schedule' || success() || (failure() && github.run_attempt >= 5) }}
         with:
           name: test-result-${{ matrix.test-case }}-${{ matrix.os }}
-          path: ./packages/tests/mochawesome-report/mochawesome.json
+          path: packages/tests/mochawesome-report/mochawesome.json
 
       - name: Upload screenshots
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: screenshots ${{ matrix.test-case }} ${{ matrix.os }}
-          path: ./packages/tests/.test-resources/screenshots/
+          path: packages/tests/.test-resources/screenshots/
 
       - name: Upload source code
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: source code ${{ matrix.test-case }} ${{ matrix.os }}
           path: |
-            ./packages/tests/**/teamsfxuitest*/*
-            !./packages/tests/**/node_modules/*
+            packages/tests/**/teamsfxuitest*/*
+            !packages/tests/**/node_modules/*
 
       - name: Upload telemetry
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always() && startsWith(matrix.test-case, 'telemetry')
         with:
           name: telemetry ${{ matrix.test-case }} ${{ matrix.os }}
@@ -538,9 +539,9 @@ jobs:
           npx ts-node src/scripts/testPlan.ts archive $testplanid
       
       - name: Download TestPlan
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
-          path: ./packages/tests/mocha-results
+          path: packages/tests/mocha-results
 
       - name: Sync to Azure DevOps Test Plan
         working-directory: packages/tests

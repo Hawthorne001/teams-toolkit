@@ -1,9 +1,42 @@
-# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.5/yaml.schema.json
+# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.7/yaml.schema.json
 # Visit https://aka.ms/teamsfx-v5.0-guide for details on this file
 # Visit https://aka.ms/teamsfx-actions for details on actions
-version: v1.5
+version: v1.7
 
 provision:
+  # Creates a new Microsoft Entra app to authenticate users if
+  # the environment variable that stores clientId is empty
+  - uses: aadApp/create
+    with:
+      # Note: when you run aadApp/update, the Microsoft Entra app name will be updated
+      # based on the definition in manifest. If you don't want to change the
+      # name, make sure the name in Microsoft Entra manifest is the same with the name
+      # defined here.
+      name: {{appName}}-aad
+      # If the value is false, the action will not generate client secret for you
+{{#MicrosoftEntra}}
+      generateClientSecret: false
+{{/MicrosoftEntra}}
+{{^MicrosoftEntra}}
+      generateClientSecret: true
+{{/MicrosoftEntra}}
+      # Authenticate users with a Microsoft work or school account in your
+      # organization's Microsoft Entra tenant (for example, single tenant).
+      signInAudience: AzureADMyOrg
+    # Write the information of created resources into environment file for the
+    # specified environment variable(s).
+    writeToEnvironmentFile:
+      clientId: AAD_APP_CLIENT_ID
+      # Environment variable that starts with `SECRET_` will be stored to the
+      # .env.{envName}.user environment file
+{{^MicrosoftEntra}}
+      clientSecret: SECRET_AAD_APP_CLIENT_SECRET
+{{/MicrosoftEntra}}
+      objectId: AAD_APP_OBJECT_ID
+      tenantId: AAD_APP_TENANT_ID
+      authority: AAD_APP_OAUTH_AUTHORITY
+      authorityHost: AAD_APP_OAUTH_AUTHORITY_HOST
+
   # Creates a Teams app
   - uses: teamsApp/create
     with:
@@ -19,6 +52,76 @@ provision:
     with:
       run:
         echo "::set-teamsfx-env OPENAPI_SERVER_URL=https://${{DEV_TUNNEL_URL}}";
+        echo "::set-teamsfx-env OPENAPI_SERVER_DOMAIN=${{DEV_TUNNEL_URL}}";
+
+  # Apply the Microsoft Entra manifest to an existing Microsoft Entra app. Will use the object id in
+  # manifest file to determine which Microsoft Entra app to update.
+  - uses: aadApp/update
+    with:
+      # Relative path to this file. Environment variables in manifest will
+      # be replaced before apply to Microsoft Entra app
+      manifestPath: ./aad.manifest.json
+      outputFilePath: ./build/aad.manifest.${{TEAMSFX_ENV}}.json
+
+  - uses: oauth/register
+    with:
+{{#MicrosoftEntra}}
+      name: aadAuthCode
+      flow: authorizationCode
+      appId: ${{TEAMS_APP_ID}}
+      clientId: ${{AAD_APP_CLIENT_ID}}
+      # Path to OpenAPI description document
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
+      identityProvider: MicrosoftEntra
+    writeToEnvironmentFile:
+      configurationId: AADAUTHCODE_CONFIGURATION_ID
+{{/MicrosoftEntra}}
+{{^MicrosoftEntra}}
+      name: oAuth2AuthCode
+      flow: authorizationCode
+      appId: ${{TEAMS_APP_ID}}
+      clientId: ${{AAD_APP_CLIENT_ID}}
+      clientSecret: ${{SECRET_AAD_APP_CLIENT_SECRET}}
+      # Path to OpenAPI description document
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
+    writeToEnvironmentFile:
+      configurationId: OAUTH2AUTHCODE_CONFIGURATION_ID
+{{/MicrosoftEntra}}
+
+  - uses: oauth/update
+    with:
+{{#MicrosoftEntra}}
+      name: aadAuthCode
+      appId: ${{TEAMS_APP_ID}}
+      # Path to OpenAPI description document
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
+      configurationId: ${{AADAUTHCODE_CONFIGURATION_ID}}
+{{/MicrosoftEntra}}
+{{^MicrosoftEntra}}
+      name: oAuth2AuthCode
+      appId: ${{TEAMS_APP_ID}}
+      # Path to OpenAPI description document
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
+      configurationId: ${{OAUTH2AUTHCODE_CONFIGURATION_ID}}
+{{/MicrosoftEntra}}
+
+  # Generate runtime appsettings to JSON file
+  - uses: file/createOrUpdateJsonFile
+    with:
+{{#isNewProjectTypeEnabled}}
+{{#PlaceProjectFileInSolutionDir}}
+      target: ../appsettings.Development.json
+{{/PlaceProjectFileInSolutionDir}}
+{{^PlaceProjectFileInSolutionDir}}
+      target: ../{{appName}}/appsettings.Development.json
+{{/PlaceProjectFileInSolutionDir}}
+{{/isNewProjectTypeEnabled}}
+{{^isNewProjectTypeEnabled}}
+      target: ./appsettings.Development.json
+{{/isNewProjectTypeEnabled}}
+      content:
+        CLIENT_ID: ${{AAD_APP_CLIENT_ID}}
+        TENANT_ID: ${{AAD_APP_TENANT_ID}}
 
   # Build Teams app package with latest env value
   - uses: teamsApp/zipAppPackage
@@ -26,7 +129,7 @@ provision:
       # Path to manifest template
       manifestPath: ./appPackage/manifest.json
       outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
-      outputJsonPath: ./appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+      outputFolder: ./appPackage/build
 
   # Validate app package using validation rules
   - uses: teamsApp/validateAppPackage
@@ -60,6 +163,7 @@ provision:
       target: ./Properties/launchSettings.json
       content:
         profiles:
+        {{^DeclarativeCopilot}}
           Microsoft 365 app (browser):
             commandName: "Project"
             dotnetRunMessages: true
@@ -77,4 +181,11 @@ provision:
             environmentVariables:
               ASPNETCORE_ENVIRONMENT: "Development"
             hotReloadProfile: "aspnetcore"
+        {{/DeclarativeCopilot}}
+        {{#DeclarativeCopilot}}
+          "Copilot (browser)": {
+            "commandName": "Project",
+            "launchUrl": "https://m365.cloud.microsoft/chat/entity1-d870f6cd-4aa5-4d42-9626-ab690c041429/${{AGENT_HINT}}?auth=2"
+          }
+        {{/DeclarativeCopilot}}
 {{/isNewProjectTypeEnabled}}

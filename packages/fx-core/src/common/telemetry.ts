@@ -162,6 +162,7 @@ export enum TelemetryEvent {
   DependencyApi = "dependency-api",
   AppStudioApi = "app-studio-api",
   MOSApi = "ttk-mos-api",
+  ViewPluginManifestAfterAdded = "view-plugin-manifest-after-added",
 }
 
 export enum ProjectTypeProps {
@@ -230,6 +231,15 @@ export enum ProjectMigratorGuideStatus {
   Cancel = "cancel",
 }
 
+export enum ApiSpecTelemetryPropertis {
+  SpecNotValidDetails = "spec-not-valid-details",
+  InvalidApiSpec = "invalid-api-spec",
+}
+
+export function getQuestionValidationErrorEventName(questionName: string) {
+  return `invalid-${questionName}`;
+}
+
 export function sendTelemetryEvent(
   component: string,
   eventName: string,
@@ -294,6 +304,10 @@ class TelemetryUtils {
       props[TelemetryProperty.ErrorCat1] = error.categories[0];
       props[TelemetryProperty.ErrorCat2] = error.categories[1];
       props[TelemetryProperty.ErrorCat3] = error.categories[2];
+    }
+
+    if (error.telemetryProperties) {
+      assign(props, error.telemetryProperties);
     }
   }
 

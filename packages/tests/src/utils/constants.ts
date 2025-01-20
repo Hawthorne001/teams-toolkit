@@ -49,7 +49,7 @@ export enum TemplateProject {
   Dashboard = "Team Central Dashboard",
   AssistDashboard = "Developer Assist Dashboard",
   DiceRoller = "Dice Roller in meeting",
-  OutlookTab = "Hello World Teams Tab Outlook add-in",
+  OutlookTab = "Hello World Teams Tab and Outlook add-in",
   OutlookSignature = "Set signature using Outlook add-in",
   ChefBot = "Teams Chef Bot",
   GraphConnectorBot = "Graph Connector Bot",
@@ -59,6 +59,9 @@ export enum TemplateProject {
   LargeScaleBot = "Large Scale Notification Bot",
   BotSSODocker = "Containerized Bot App with SSO Enabled",
   HelloWorldTabDocker = "Containerized Hello World Tab with Backend",
+  FoodCatalog = "Ingest Custom API Data into Microsoft 365 with a Microsoft Graph Connector",
+  RedditLink = "Format Reddit Link into Adaptive Card",
+  IntelligentDataChart = "Intelligent Data Chart Generator",
 }
 
 export enum TemplateProjectFolder {
@@ -93,6 +96,9 @@ export enum TemplateProjectFolder {
   TabSSOApimProxy = "sso-enabled-tab-via-apim-proxy",
   LargeScaleBot = "large-scale-notification",
   HelloWorldTabDocker = "hello-world-tab-docker",
+  FoodCatalog = "nodejs-typescript-food-catalog",
+  RedditLink = "nodejs",
+  IntelligentDataChart = "intelligent-data-chart-generator",
   // v2 only
   Deeplinking = "deep-linking-hello-world-tab-without-sso-M365",
 }
@@ -134,6 +140,10 @@ export const sampleProjectMap: Record<TemplateProject, TemplateProjectFolder> =
     [TemplateProject.BotSSODocker]: TemplateProjectFolder.BotSSODocker,
     [TemplateProject.HelloWorldTabDocker]:
       TemplateProjectFolder.HelloWorldTabDocker,
+    [TemplateProject.FoodCatalog]: TemplateProjectFolder.FoodCatalog,
+    [TemplateProject.RedditLink]: TemplateProjectFolder.RedditLink,
+    [TemplateProject.IntelligentDataChart]:
+      TemplateProjectFolder.IntelligentDataChart,
   };
 
 export enum Resource {
@@ -172,11 +182,12 @@ export enum Capability {
   Agent = "custom-copilot-agent",
   TaskPane = "taskpane",
   ApiPlugin = "api-plugin",
+  DeclarativeAgent = "declarative-agent",
 }
 
 export enum Trigger {
   Http = "http-functions",
-  Restify = "http-restify",
+  Express = "http-express",
   Timmer = "timer-functions",
 }
 
@@ -233,10 +244,10 @@ export class Timeout {
    */
   public static readonly chromiumLaunchTimeout: number = 1 * 60 * 1000;
   public static readonly playwrightDefaultTimeout: number = 2 * 60 * 1000;
-  public static readonly playwrightConsentPageReload: number = 500;
+  public static readonly playwrightConsentPageReload: number = 3000;
   public static readonly playwrightBotConsentContinueButton: number =
     2 * 60 * 1000;
-  public static readonly playwrightConsentPopupPage: number = 10 * 1000;
+  public static readonly playwrightConsentPopupPage: number = 30 * 1000;
   public static readonly playwrightAddAppButton: number = 180 * 1000;
 
   // mocha
@@ -343,7 +354,7 @@ export type AppType =
   | "bot"
   | "crbot" // command and response bot (name cannot be too long or it will exceed teams app name limit)
   | "funcnoti" // functions notification bot
-  | "restnoti" // restify notification bot
+  | "expressnoti" // express notification bot
   | "msg"
   | "msgsa"
   | "m365lp"
@@ -393,10 +404,16 @@ export enum LocalDebugTaskLabel {
   StartWebServer = "Start web server",
   DockerRun = "docker-run: debug",
   DockerTask = "docker",
+  EnsureDevTunnnel = "Ensure DevTunnel",
+  RunWatch = "Run watch",
+  FuncStart = "func: host start",
 }
 
 export class LocalDebugTaskResult {
   static readonly FrontendSuccess = "Compiled successfully";
+  static readonly FrontendReady = "ready";
+  static readonly FrontendNoIssue = "webpack compiled";
+  static readonly FrontendStarted = "Express server listening on";
   static readonly StartSuccess = "started successfully";
   static readonly AzuriteSuccess = "Azurite Table service is successfully";
   static readonly CompiledSuccess = "Found 0 errors";
@@ -408,17 +425,23 @@ export class LocalDebugTaskResult {
   static readonly DebuggerAttached = "Debugger attached";
   static readonly WebServerSuccess = "press h to show help";
   static readonly DockerFinish = "press any key to close it";
+  static readonly DevtunnelSuccess = "Ready to accept connections for tunnel:";
+  static readonly FunctionStarted = "Worker process started and initialized";
 }
 
 export enum LocalDebugTaskLabel2 {
   StartBot2 = "Start Bot",
   PythonDebugConsole = "Python Debug Console",
+  StartTestTool = "Start Test Tool",
 }
 
 export enum LocalDebugError {
   ElementNotInteractableError = "ElementNotInteractableError",
   TimeoutError = "TimeoutError",
   WarningError = "Warning",
+  WarningCapError = "WARNING",
+  DeprecatedError = "npm warn deprecated",
+  CompiledWithWarningError = "Compiled with warnings",
 }
 
 export class LocalDebugTaskInfo {
@@ -429,6 +452,7 @@ export class LocalDebugTaskInfo {
 
 export class DebugItemSelect {
   static readonly DebugInTeamsUsingChrome = "Debug in Teams (Chrome)";
+  static readonly DebugInTestTool = "Debug in Test Tool";
 }
 
 export class TestFilePath {
@@ -453,7 +477,7 @@ export class Notification {
 }
 
 export class CreateProjectQuestion {
-  static readonly CustomCopilot = "Custom Engine Copilot";
+  static readonly CustomCopilot = "Custom Engine Agent";
   static readonly Bot = "Bot";
   static readonly Tab = "Tab";
   static readonly MessageExtension = "Message Extension";
@@ -465,6 +489,9 @@ export class CreateProjectQuestion {
   static readonly NewAddinApp = "Start with an Outlook add-in";
   static readonly CreateNewSpfxSolution = "Create New SPFx Solution";
   static readonly ImportExistingSpfxSolution = "Import Existing SPFx Solution";
+  static readonly BuildNotificationBot = "Build a Notification Bot";
+  static readonly BuildDeclarativeAgent = "Build a Declarative Agent";
+  static readonly StartWithNewApi = "Start with a New API";
 }
 
 export class ValidationContent {

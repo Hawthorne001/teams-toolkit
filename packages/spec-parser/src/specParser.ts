@@ -29,9 +29,11 @@ import { SpecFilter } from "./specFilter";
 import { Utils } from "./utils";
 import { ManifestUpdater } from "./manifestUpdater";
 import { AdaptiveCardGenerator } from "./adaptiveCardGenerator";
-import { wrapAdaptiveCard } from "./adaptiveCardWrapper";
+import { wrapAdaptiveCard, wrapResponseSemantics } from "./adaptiveCardWrapper";
 import { ValidatorFactory } from "./validators/validatorFactory";
 import { Validator } from "./validators/validator";
+import { createHash } from "crypto";
+import { PluginManifestSchema } from "@microsoft/teams-manifest";
 
 /**
  * A class that parses an OpenAPI specification file and provides methods to validate, list, and generate artifacts.
@@ -82,20 +84,31 @@ export class SpecParser {
    */
   async validate(): Promise<ValidateResult> {
     try {
+      let hash = "";
+
       try {
         await this.loadSpec();
         if (!this.parser.$refs.circular) {
           await this.parser.validate(this.spec!);
         } else {
+          // The following code still hangs for Graph API, support will be added when SwaggerParser is updated.
+          /*
           const clonedUnResolveSpec = JSON.parse(JSON.stringify(this.unResolveSpec));
           await this.parser.validate(clonedUnResolveSpec);
+          */
         }
       } catch (e) {
         return {
           status: ValidationStatus.Error,
           warnings: [],
           errors: [{ type: ErrorType.SpecNotValid, content: (e as Error).toString() }],
+          specHash: hash,
         };
+      }
+
+      if (this.unResolveSpec!.servers) {
+        const serverString = JSON.stringify(this.unResolveSpec!.servers);
+        hash = createHash("sha256").update(serverString).digest("hex");
       }
 
       const errors: ErrorResult[] = [];
@@ -108,6 +121,7 @@ export class SpecParser {
           errors: [
             { type: ErrorType.SwaggerNotSupported, content: ConstantString.SwaggerNotSupported },
           ],
+          specHash: hash,
         };
       }
 
@@ -146,6 +160,7 @@ export class SpecParser {
         status: status,
         warnings: warnings,
         errors: errors,
+        specHash: hash,
       };
     } catch (err) {
       throw new SpecParserError((err as Error).toString(), ErrorType.ValidateFailed);
@@ -262,7 +277,7 @@ export class SpecParser {
       }
 
       const clonedUnResolveSpec = JSON.parse(JSON.stringify(newUnResolvedSpec));
-      const newSpec = (await this.parser.dereference(clonedUnResolveSpec)) as OpenAPIV3.Document;
+      const newSpec = await this.deReferenceSpec(clonedUnResolveSpec);
       return [newUnResolvedSpec, newSpec];
     } catch (err) {
       if (err instanceof SpecParserError) {
@@ -270,6 +285,11 @@ export class SpecParser {
       }
       throw new SpecParserError((err as Error).toString(), ErrorType.GetSpecFailed);
     }
+  }
+
+  private async deReferenceSpec(spec: any): Promise<OpenAPIV3.Document> {
+    const result = await this.parser.dereference(spec);
+    return result as OpenAPIV3.Document;
   }
 
   /**
@@ -284,6 +304,7 @@ export class SpecParser {
     filter: string[],
     outputSpecPath: string,
     pluginFilePath: string,
+    existingPluginFilePath?: string,
     signal?: AbortSignal
   ): Promise<GenerateResult> {
     const result: GenerateResult = {
@@ -296,7 +317,37 @@ export class SpecParser {
       const newUnResolvedSpec = newSpecs[0];
       const newSpec = newSpecs[1];
 
-      const authInfo = Utils.getAuthInfo(newSpec);
+      const paths = newUnResolvedSpec.paths;
+      for (const pathUrl in paths) {
+        const operations = paths[pathUrl];
+        for (const method in operations) {
+          const operationItem = (operations as any)[method] as OpenAPIV3.OperationObject;
+          const operationId = operationItem.operationId!;
+
+          const containsSpecialCharacters = /[^a-zA-Z0-9_]/.test(operationId);
+          if (containsSpecialCharacters) {
+            operationItem.operationId = operationId.replace(/[^a-zA-Z0-9]/g, "_");
+            result.warnings.push({
+              type: WarningType.OperationIdContainsSpecialCharacters,
+              content: Utils.format(
+                ConstantString.OperationIdContainsSpecialCharacters,
+                operationId,
+                operationItem.operationId
+              ),
+              data: operationId,
+            });
+          }
+
+          const authArray = Utils.getAuthArray(operationItem.security, newSpec);
+          if (Utils.isNotSupportedAuth(authArray)) {
+            result.warnings.push({
+              type: WarningType.UnsupportedAuthType,
+              content: Utils.format(ConstantString.AuthTypeIsNotSupported, operationId),
+              data: operationId,
+            });
+          }
+        }
+      }
 
       await this.saveFilterSpec(outputSpecPath, newUnResolvedSpec);
 
@@ -304,6 +355,14 @@ export class SpecParser {
         throw new SpecParserError(ConstantString.CancelledMessage, ErrorType.Cancelled);
       }
 
+      const existingPluginManifestInfo = existingPluginFilePath
+        ? {
+            manifestPath: existingPluginFilePath,
+            specPath: this.pathOrSpec as string,
+          }
+        : undefined;
+
+      const authMap = Utils.getAuthMap(newSpec);
       const [updatedManifest, apiPlugin, warnings] =
         await ManifestUpdater.updateManifestWithAiPlugin(
           manifestPath,
@@ -311,7 +370,8 @@ export class SpecParser {
           pluginFilePath,
           newSpec,
           this.options,
-          authInfo
+          authMap,
+          existingPluginManifestInfo
         );
 
       result.warnings.push(...warnings);
@@ -365,7 +425,9 @@ export class SpecParser {
             if (this.options.allowMethods.includes(method)) {
               const operation = (newSpec.paths[url] as any)[method] as OpenAPIV3.OperationObject;
               try {
-                const [card, jsonPath] = AdaptiveCardGenerator.generateAdaptiveCard(operation);
+                const [card, jsonPath, jsonData, warnings] =
+                  AdaptiveCardGenerator.generateAdaptiveCard(operation);
+                result.warnings.push(...warnings);
                 const safeAdaptiveCardName = operation.operationId!.replace(/[^a-zA-Z0-9]/g, "_");
                 const fileName = path.join(adaptiveCardFolder, `${safeAdaptiveCardName}.json`);
                 const wrappedCard = wrapAdaptiveCard(card, jsonPath);
@@ -374,7 +436,7 @@ export class SpecParser {
                   adaptiveCardFolder,
                   `${safeAdaptiveCardName}.data.json`
                 );
-                await fs.outputJSON(dataFileName, {}, { spaces: 2 });
+                await fs.outputJSON(dataFileName, jsonData, { spaces: 2 });
               } catch (err) {
                 result.allSuccess = false;
                 result.warnings.push({
@@ -414,6 +476,72 @@ export class SpecParser {
     return result;
   }
 
+  /**
+   * Generates and update artifacts from the OpenAPI specification file. Generate Adaptive Cards, update Teams app manifest, and generate a new OpenAPI specification file.
+   * @param pluginFilePath A file path of the plugin manifest file to update.
+   * @param filter An array of strings that represent the filters to apply when generating the artifacts. If filter is empty, it would process nothing.
+   */
+  async generateAdaptiveCardInPlugin(
+    pluginFilePath: string,
+    filter: string[],
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (!this.options.allowResponseSemantics) {
+      return;
+    }
+
+    const newSpecs = await this.getFilteredSpecs(filter, signal);
+    const newSpec = newSpecs[1];
+    const apiPlugin = (await fs.readJSON(pluginFilePath)) as PluginManifestSchema;
+
+    const paths = newSpec.paths;
+    for (const pathUrl in paths) {
+      const pathItem = paths[pathUrl];
+      if (pathItem) {
+        const operations = pathItem;
+        for (const method in operations) {
+          if (this.options.allowMethods.includes(method)) {
+            const operationItem = (operations as any)[method] as OpenAPIV3.OperationObject;
+            if (operationItem) {
+              try {
+                const operationId = operationItem.operationId!;
+                const safeFunctionName = operationId.replace(/[^a-zA-Z0-9]/g, "_");
+                if (
+                  apiPlugin.functions!.findIndex((func) => func.name === safeFunctionName) === -1
+                ) {
+                  continue;
+                }
+
+                const { json } = Utils.getResponseJson(operationItem);
+                if (json.schema) {
+                  const [card, jsonPath] = AdaptiveCardGenerator.generateAdaptiveCard(
+                    operationItem,
+                    false,
+                    5
+                  );
+
+                  const responseSemantic = wrapResponseSemantics(card, jsonPath);
+                  apiPlugin.functions!.find(
+                    (func) => func.name === safeFunctionName
+                  )!.capabilities = {
+                    response_semantics: responseSemantic,
+                  };
+                }
+              } catch (err) {
+                throw new SpecParserError(
+                  (err as Error).toString(),
+                  ErrorType.GenerateAdaptiveCardFailed
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
+    await fs.outputJSON(pluginFilePath, apiPlugin, { spaces: 4 });
+  }
+
   private async loadSpec(): Promise<void> {
     if (!this.spec) {
       const spec = (await this.parser.parse(this.pathOrSpec)) as OpenAPIV3.Document;
@@ -426,7 +554,8 @@ export class SpecParser {
       }
 
       const clonedUnResolveSpec = JSON.parse(JSON.stringify(this.unResolveSpec));
-      this.spec = (await this.parser.dereference(clonedUnResolveSpec)) as OpenAPIV3.Document;
+
+      this.spec = await this.deReferenceSpec(clonedUnResolveSpec);
     }
   }
 

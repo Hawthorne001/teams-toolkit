@@ -28,6 +28,9 @@ class MockClipboard {
 
 export function initialize() {
   generateMock("debug");
+  (mockedVSCode as any).debug.activeDebugConsole = {
+    appendLine: () => {},
+  };
   generateMock("scm");
   generateNotebookMocks();
 
@@ -104,11 +107,10 @@ mockedVSCode.Task = vscodeMocks.vscMockExtHostedTypes.Task;
 (mockedVSCode as any).CancellationError = vscodeMocks.vscMockExtHostedTypes.CancellationError;
 (mockedVSCode as any).LSPCancellationError = vscodeMocks.vscMockExtHostedTypes.LSPCancellationError;
 mockedVSCode.TaskRevealKind = vscodeMocks.vscMockExtHostedTypes.TaskRevealKind;
-mockedVSCode.LanguageModelChatMessage = vscodeMocks.chat.LanguageModelChatMessage;
-mockedVSCode.LanguageModelChatMessageRole = vscodeMocks.chat.LanguageModelChatMessageRole;
+(mockedVSCode as any).LanguageModelChatMessage = vscodeMocks.chat.LanguageModelChatMessage;
+(mockedVSCode as any).LanguageModelChatMessageRole = vscodeMocks.chat.LanguageModelChatMessageRole;
 mockedVSCode.TextDocumentSaveReason = vscodeMocks.TextDocumentSaveReason;
 (mockedVSCode as any).version = "test";
-
 // Setup window APIs
 (mockedVSCode as any).window = {
   activeTextEditor: undefined,

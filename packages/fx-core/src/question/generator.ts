@@ -457,6 +457,12 @@ async function batchGenerate() {
 
   await generateCliOptions(questionNodes.uninstall(), "Uninstall");
   await generateInputs(questionNodes.uninstall(), "Uninstall");
+
+  await generateCliOptions(questionNodes.syncManifest(), "SyncManifest");
+  await generateInputs(questionNodes.syncManifest(), "SyncManifest");
+
+  await generateCliOptions(questionNodes.addAuthAction(), "AddAuthAction");
+  await generateInputs(questionNodes.addAuthAction(), "AddAuthAction");
 }
 
 void batchGenerate();

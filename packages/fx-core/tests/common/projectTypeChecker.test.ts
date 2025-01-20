@@ -15,6 +15,7 @@ import {
   projectTypeChecker,
 } from "../../src/common/projectTypeChecker";
 import { MetadataV3 } from "../../src/common/versionMetadata";
+import { IsDeclarativeAgentManifest } from "../../build/common/projectTypeChecker";
 
 describe("ProjectTypeChecker", () => {
   const sandbox = sinon.createSandbox();
@@ -112,6 +113,10 @@ describe("ProjectTypeChecker", () => {
           plugins: [1],
           declarativeCopilots: [1],
         },
+        copilotAgents: {
+          plugins: [1],
+          declarativeAgents: [1],
+        },
       };
       const capabilities = getCapabilities(manifest);
       assert.deepEqual(capabilities, [
@@ -123,6 +128,16 @@ describe("ProjectTypeChecker", () => {
         "plugin",
         "copilotGpt",
       ]);
+    });
+    it("copilot agents", async () => {
+      const manifest = {
+        copilotAgents: {
+          plugins: [1],
+          declarativeAgents: [1],
+        },
+      };
+      const capabilities = getCapabilities(manifest);
+      assert.deepEqual(capabilities, ["plugin", "copilotGpt"]);
     });
     it("empty manifest", async () => {
       const manifest = {
@@ -501,6 +516,36 @@ describe("ProjectTypeChecker", () => {
       const res = await projectTypeChecker.checkProjectType(path.join("./abc.json"));
       assert.isFalse(res.hasTeamsManifest);
       assert.isFalse(res.dependsOnTeamsJs);
+    });
+  });
+
+  describe("isDeclarativeAgentManifest", () => {
+    it("is declarative agent manifest", async () => {
+      const manifest = {
+        copilotAgents: {
+          declarativeAgents: [{}],
+        },
+      };
+      const isDeclarativeAgent = IsDeclarativeAgentManifest(manifest);
+      assert.isTrue(isDeclarativeAgent);
+    });
+
+    it("is not declarative agent manifest", async () => {
+      const manifest1 = {};
+      let isDeclarativeAgent = IsDeclarativeAgentManifest(manifest1);
+      assert.isFalse(isDeclarativeAgent);
+      const manifest2 = {
+        copilotAgents: {},
+      };
+      isDeclarativeAgent = IsDeclarativeAgentManifest(manifest2);
+      assert.isFalse(isDeclarativeAgent);
+      const manifest3 = {
+        copilotAgents: {
+          declarativeAgents: [],
+        },
+      };
+      isDeclarativeAgent = IsDeclarativeAgentManifest(manifest3);
+      assert.isFalse(isDeclarativeAgent);
     });
   });
 });

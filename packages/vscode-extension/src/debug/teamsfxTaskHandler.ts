@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import path from "path";
-import { performance } from "perf_hooks";
-import * as util from "util";
-import * as vscode from "vscode";
-
 import { ProductName, UserError } from "@microsoft/teamsfx-api";
 import {
   Correlator,
@@ -14,18 +9,23 @@ import {
   isValidProject,
   TaskCommand,
 } from "@microsoft/teamsfx-core";
-
+import path from "path";
+import { performance } from "perf_hooks";
+import * as util from "util";
+import * as vscode from "vscode";
 import VsCodeLogInstance from "../commonlib/log";
 import { ExtensionErrors, ExtensionSource } from "../error/error";
-import { VS_CODE_UI } from "../qm/vsc_ui";
 import * as globalVariables from "../globalVariables";
+import { cdpClientManager, isM365CopilotChatDebugConfiguration } from "../pluginDebugger/cdpClient";
+import { VS_CODE_UI } from "../qm/vsc_ui";
 import {
   TelemetryEvent,
   TelemetryMeasurements,
   TelemetryProperty,
 } from "../telemetry/extTelemetryEvents";
-import { localize } from "../utils/localizeUtils";
 import { getNpmInstallLogInfo, getTestToolLogInfo } from "../utils/localEnvManagerUtils";
+import { localize } from "../utils/localizeUtils";
+import { processUtil } from "../utils/processUtil";
 import {
   clearAADAfterLocalDebugHelpLink,
   DebugNoSessionId,
@@ -35,17 +35,17 @@ import {
   issueTemplate,
   m365AppsPrerequisitesHelpLink,
 } from "./common/debugConstants";
-import { localTelemetryReporter, sendDebugAllEvent } from "./localTelemetryReporter";
-import { BaseTunnelTaskTerminal } from "./taskTerminal/baseTunnelTaskTerminal";
-import { TeamsfxDebugConfiguration } from "./common/teamsfxDebugConfiguration";
 import { allRunningTeamsfxTasks } from "./common/globalVariables";
 import {
-  getLocalDebugSession,
   endLocalDebugSession,
+  getLocalDebugSession,
   getLocalDebugSessionId,
 } from "./common/localDebugSession";
-import { allRunningDebugSessions } from "./officeTaskHandler";
+import { TeamsfxDebugConfiguration } from "./common/teamsfxDebugConfiguration";
 import { deleteAad } from "./deleteAadHelper";
+import { localTelemetryReporter, sendDebugAllEvent } from "./localTelemetryReporter";
+import { allRunningDebugSessions } from "./officeTaskHandler";
+import { BaseTunnelTaskTerminal } from "./taskTerminal/baseTunnelTaskTerminal";
 
 class NpmInstallTaskInfo {
   private startTime: number;
@@ -107,7 +107,7 @@ function isCheckDevProxyTask(task: vscode.Task): boolean {
 function isTeamsFxTransparentTask(task: vscode.Task): boolean {
   if (task.definition && task.definition.type === ProductName) {
     const command = task.definition.command as string;
-    if (Object.values(TaskCommand).includes(command)) {
+    if (Object.values(TaskCommand).includes(command as any)) {
       return true;
     }
   }
@@ -232,7 +232,7 @@ async function onDidStartTaskProcessHandler(event: vscode.TaskProcessStartEvent)
       const session = getLocalDebugSession();
       if (session.id !== DebugNoSessionId) {
         if (session.failedServices.length > 0) {
-          terminateAllRunningTeamsfxTasks();
+          await terminateAllRunningTeamsfxTasks();
           // TODO: send test tool log file
           await sendDebugAllEvent(
             new UserError({
@@ -248,6 +248,9 @@ async function onDidStartTaskProcessHandler(event: vscode.TaskProcessStartEvent)
           return;
         }
         await sendDebugAllEvent(undefined, { [TelemetryProperty.DebugTestTool]: "true" });
+        // Need to endLocalDebugSession() here.
+        // Otherwise, when user stops debugging, or task exits, it will incorrectly send an incorrect debug-all event with success=no
+        endLocalDebugSession();
       }
     }
   }
@@ -283,7 +286,7 @@ async function onDidEndTaskProcessHandler(event: vscode.TaskProcessEndEvent): Pr
       // This is the final task for test tool.
       // If this task exits (even exitCode is 0) before being successfully started, the debug fails.
       if (currentSession.id !== DebugNoSessionId) {
-        terminateAllRunningTeamsfxTasks();
+        await terminateAllRunningTeamsfxTasks();
         await sendDebugAllEvent(
           new UserError({
             source: ExtensionSource,
@@ -320,7 +323,7 @@ async function onDidEndTaskProcessHandler(event: vscode.TaskProcessEndEvent): Pr
     event.exitCode !== 0 &&
     event.exitCode !== -1
   ) {
-    terminateAllRunningTeamsfxTasks();
+    await terminateAllRunningTeamsfxTasks();
   } else if (isNpmInstallTask(task)) {
     try {
       const taskInfo = activeNpmInstallTasks.get(task.name);
@@ -440,7 +443,7 @@ async function onDidEndTaskProcessHandler(event: vscode.TaskProcessEndEvent): Pr
             )
           );
         }
-        terminateAllRunningTeamsfxTasks();
+        await terminateAllRunningTeamsfxTasks();
       }
     } catch {
       // ignore any error
@@ -449,6 +452,12 @@ async function onDidEndTaskProcessHandler(event: vscode.TaskProcessEndEvent): Pr
 }
 
 async function onDidStartDebugSessionHandler(event: vscode.DebugSession): Promise<void> {
+  const port = isM365CopilotChatDebugConfiguration(event.configuration);
+  if (port) {
+    const url = event.configuration.url;
+    const name = event.configuration.name;
+    cdpClientManager.start(url, port, name);
+  }
   if (globalVariables.workspaceUri && isValidProject(globalVariables.workspaceUri.fsPath)) {
     const debugConfig = event.configuration as TeamsfxDebugConfiguration;
     if (
@@ -500,7 +509,7 @@ async function onDidStartDebugSessionHandler(event: vscode.DebugSession): Promis
         // Handle cases that some services failed immediately after start.
         const currentSession = getLocalDebugSession();
         if (currentSession.id !== DebugNoSessionId && currentSession.failedServices.length > 0) {
-          terminateAllRunningTeamsfxTasks();
+          await terminateAllRunningTeamsfxTasks();
           await vscode.debug.stopDebugging();
           await sendDebugAllEvent(
             new UserError({
@@ -525,22 +534,26 @@ async function onDidStartDebugSessionHandler(event: vscode.DebugSession): Promis
   }
 }
 
-export function terminateAllRunningTeamsfxTasks(): void {
+export async function terminateAllRunningTeamsfxTasks(): Promise<void> {
   for (const task of allRunningTeamsfxTasks) {
     try {
       if (task[1] > 0) {
-        process.kill(task[1], "SIGTERM");
+        await processUtil.killProcess(task[1]);
       }
     } catch (e) {
       // ignore and keep killing others
     }
   }
   allRunningTeamsfxTasks.clear();
-  BaseTunnelTaskTerminal.stopAll();
   void deleteAad();
+  BaseTunnelTaskTerminal.stopAll();
 }
 
-function onDidTerminateDebugSessionHandler(event: vscode.DebugSession): void {
+async function onDidTerminateDebugSessionHandler(event: vscode.DebugSession): Promise<void> {
+  const port = isM365CopilotChatDebugConfiguration(event.configuration);
+  if (port) {
+    await cdpClientManager.stop(port);
+  }
   if (allRunningDebugSessions.has(event.id)) {
     // a valid debug session
     // send stop-debug event telemetry
@@ -548,7 +561,7 @@ function onDidTerminateDebugSessionHandler(event: vscode.DebugSession): void {
       [TelemetryProperty.DebugSessionId]: event.id,
     });
 
-    terminateAllRunningTeamsfxTasks();
+    await terminateAllRunningTeamsfxTasks();
 
     allRunningDebugSessions.delete(event.id);
     if (allRunningDebugSessions.size == 0) {

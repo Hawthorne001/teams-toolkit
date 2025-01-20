@@ -11,7 +11,7 @@ This template showcases an app that embeds a canvas containing multiple cards th
 > **Prerequisites**
 > To run the dashboard template in your local dev machine, you will need:
 >
-> - [Node.js](https://nodejs.org/), supported versions: 16, 18
+> - [Node.js](https://nodejs.org/), supported versions: 18, 20
 > - A [Microsoft 365 account for development](https://docs.microsoft.com/microsoftteams/platform/toolkit/accounts)
 > - [Set up your dev environment for extending Teams apps across Microsoft 365](https://aka.ms/teamsfx-m365-apps-prerequisites)
 >   Please note that after you enrolled your developer tenant in Office 365 Target Release, it may take couple days for the enrollment to take effect.
@@ -52,11 +52,13 @@ The following files can be customized and demonstrate an example implementation 
 
 The following are project-related files. You generally will not need to customize these files.
 
-| File                       | Contents                             |
-| -------------------------- | ------------------------------------ |
-| `src/index.css`            | The style of application entry point |
-| `src/index.jsx`            | Application entry point              |
-| `src/internal/context.jsx` | TeamsFx Context                      |
+| File                       | Contents                                   |
+| -------------------------- | ------------------------------------------ |
+| `src/main.css`             | The style of React application entry point |
+| `src/main.jsx`             | The entry point for a React application    |
+| `src/internal/context.jsx` | TeamsFx Context                            |
+| `index.html`               | The entry point of the application         |
+| `vite.config.js`           | Vite configuration file                    |
 
 The following are Teams Toolkit specific project files. You can [visit a complete guide on Github](https://github.com/OfficeDev/TeamsFx/wiki/Teams-Toolkit-Visual-Studio-Code-v5-Guide#overview) to understand how Teams Toolkit works.
 

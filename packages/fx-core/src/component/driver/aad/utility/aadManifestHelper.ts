@@ -15,11 +15,25 @@ import {
   UnknownResourceAccessTypeUserError,
   UnknownResourceAppIdUserError,
 } from "../error/aadManifestError";
+import { TOOLS } from "../../../../common/globalVars";
+import { getLocalizedString } from "../../../../common/localizeUtils";
+import { err, FxError, ok, Result } from "@microsoft/teamsfx-api";
+import { FileNotFoundError, UserCancelError } from "../../../../error";
+import fs from "fs-extra";
+import { parseDocument } from "yaml";
+import { MetadataV3 } from "../../../../common/versionMetadata";
+import path from "path";
 
 const componentName = "AadManifestHelper";
 
 export class AadManifestHelper {
-  public static manifestToApplication(manifest: AADManifest): AADApplication {
+  public static manifestToApplication(manifest: AADManifest | AADApplication): AADApplication {
+    if (this.isNewAADManifestSchema(manifest)) {
+      return manifest as AADApplication;
+    }
+
+    manifest = manifest as AADManifest;
+
     const result: AADApplication = {
       id: manifest.id,
       appId: manifest.appId,
@@ -170,13 +184,8 @@ export class AadManifestHelper {
     return result;
   }
 
-  public static validateManifest(manifest: AADManifest): string {
+  public static validateManifest(manifest: AADManifest | AADApplication): string {
     let warningMsg = "";
-
-    // if manifest doesn't contain name property or name is empty
-    if (!manifest.name || manifest.name === "") {
-      warningMsg += AadManifestErrorMessage.NameIsMissing;
-    }
 
     // if manifest doesn't contain signInAudience property
     if (!manifest.signInAudience) {
@@ -188,19 +197,54 @@ export class AadManifestHelper {
       warningMsg += AadManifestErrorMessage.RequiredResourceAccessIsMissing;
     }
 
-    // if manifest doesn't contain oauth2Permissions or oauth2Permissions length is 0
-    if (!manifest.oauth2Permissions || manifest.oauth2Permissions.length === 0) {
-      warningMsg += AadManifestErrorMessage.Oauth2PermissionsIsMissing;
-    }
+    if (AadManifestHelper.isNewAADManifestSchema(manifest)) {
+      manifest = manifest as AADApplication;
+      // if manifest doesn't contain name property or name is empty
+      if (!manifest.displayName || manifest.displayName === "") {
+        warningMsg += AadManifestErrorMessage.NameIsMissing;
+      }
 
-    // if manifest doesn't contain preAuthorizedApplications
-    if (!manifest.preAuthorizedApplications || manifest.preAuthorizedApplications.length === 0) {
-      warningMsg += AadManifestErrorMessage.PreAuthorizedApplicationsIsMissing;
-    }
+      // if manifest doesn't contain oauth2Permissions or oauth2Permissions length is 0
+      if (
+        !manifest.api?.oauth2PermissionScopes ||
+        manifest.api?.oauth2PermissionScopes.length === 0
+      ) {
+        warningMsg += AadManifestErrorMessage.Oauth2PermissionsIsMissing;
+      }
 
-    // if accessTokenAcceptedVersion in manifest is not 2
-    if (manifest.accessTokenAcceptedVersion !== 2) {
-      warningMsg += AadManifestErrorMessage.AccessTokenAcceptedVersionIs1;
+      // if manifest doesn't contain preAuthorizedApplications
+      if (
+        !manifest.api?.preAuthorizedApplications ||
+        manifest.api?.preAuthorizedApplications.length === 0
+      ) {
+        warningMsg += AadManifestErrorMessage.PreAuthorizedApplicationsIsMissing;
+      }
+
+      // if accessTokenAcceptedVersion in manifest is not 2
+      if (manifest.api?.requestedAccessTokenVersion !== 2) {
+        warningMsg += AadManifestErrorMessage.AccessTokenAcceptedVersionIs1;
+      }
+    } else {
+      manifest = manifest as AADManifest;
+      // if manifest doesn't contain name property or name is empty
+      if (!manifest.name || manifest.name === "") {
+        warningMsg += AadManifestErrorMessage.NameIsMissing;
+      }
+
+      // if manifest doesn't contain oauth2Permissions or oauth2Permissions length is 0
+      if (!manifest.oauth2Permissions || manifest.oauth2Permissions.length === 0) {
+        warningMsg += AadManifestErrorMessage.Oauth2PermissionsIsMissing;
+      }
+
+      // if manifest doesn't contain preAuthorizedApplications
+      if (!manifest.preAuthorizedApplications || manifest.preAuthorizedApplications.length === 0) {
+        warningMsg += AadManifestErrorMessage.PreAuthorizedApplicationsIsMissing;
+      }
+
+      // if accessTokenAcceptedVersion in manifest is not 2
+      if (manifest.accessTokenAcceptedVersion !== 2) {
+        warningMsg += AadManifestErrorMessage.AccessTokenAcceptedVersionIs1;
+      }
     }
 
     // if manifest doesn't contain optionalClaims or access token doesn't contain idtyp clams
@@ -216,7 +260,9 @@ export class AadManifestHelper {
     return warningMsg.trimEnd();
   }
 
-  public static processRequiredResourceAccessInManifest(manifest: AADManifest): void {
+  public static processRequiredResourceAccessInManifest(
+    manifest: AADManifest | AADApplication
+  ): void {
     const map = getPermissionMap();
 
     if (manifest.requiredResourceAccess && !Array.isArray(manifest.requiredResourceAccess)) {
@@ -266,5 +312,105 @@ export class AadManifestHelper {
         }
       });
     });
+  }
+
+  public static isNewAADManifestSchema(manifest: AADManifest | AADApplication): boolean {
+    return "displayName" in manifest;
+  }
+
+  public static async showWarningIfManifestIsOutdated(
+    manifestTemplatePath: string,
+    projectPath: string
+  ): Promise<void> {
+    const manifest = await fs.readJson(manifestTemplatePath);
+    if (!AadManifestHelper.isNewAADManifestSchema(manifest)) {
+      void TOOLS.ui
+        .showMessage(
+          "warn",
+          getLocalizedString("core.convertAadToNewSchema.outdate"),
+          false,
+          getLocalizedString("core.convertAadToNewSchema.upgrade")
+        )
+        .then((result) => {
+          if (
+            result.isOk() &&
+            result.value === getLocalizedString("core.convertAadToNewSchema.upgrade")
+          ) {
+            void AadManifestHelper.convertManifestToNewSchemaAndOverride(
+              manifestTemplatePath,
+              projectPath
+            );
+          }
+        });
+    }
+  }
+
+  public static async convertManifestToNewSchemaAndOverride(
+    manifestTemplatePath: string,
+    projectPath: string
+  ): Promise<Result<undefined, FxError>> {
+    if (!(await fs.pathExists(manifestTemplatePath))) {
+      return err(new FileNotFoundError("convertAadToNewSchema", manifestTemplatePath));
+    }
+    const manifest = await fs.readJson(manifestTemplatePath);
+
+    if (AadManifestHelper.isNewAADManifestSchema(manifest)) {
+      void TOOLS.ui.showMessage(
+        "info",
+        getLocalizedString("core.convertAadToNewSchema.alreadyNewSchema"),
+        false
+      );
+      return ok(undefined);
+    }
+
+    const confirmRes = await TOOLS.ui.showMessage(
+      "warn",
+      getLocalizedString("core.convertAadToNewSchema.warning"),
+      true,
+      getLocalizedString("core.convertAadToNewSchema.continue")
+    );
+
+    if (
+      confirmRes.isOk() &&
+      confirmRes.value !== getLocalizedString("core.convertAadToNewSchema.continue")
+    ) {
+      return err(new UserCancelError());
+    }
+
+    const result = AadManifestHelper.manifestToApplication(manifest);
+    await fs.writeJson(manifestTemplatePath, result, { spaces: 2 });
+    void TOOLS.ui.showMessage(
+      "info",
+      getLocalizedString("core.convertAadToNewSchema.success"),
+      false
+    );
+
+    await AadManifestHelper.updateVersionForTeamsAppYamlFile(projectPath);
+    return ok(undefined);
+  }
+
+  public static async updateVersionForTeamsAppYamlFile(projectPath: string): Promise<void> {
+    const allPossilbeYamlFileNames = [
+      MetadataV3.localConfigFile,
+      MetadataV3.configFile,
+      MetadataV3.testToolConfigFile,
+    ];
+    for (const yamlFileName of allPossilbeYamlFileNames) {
+      const ymlPath = path.join(projectPath, yamlFileName);
+      if (await fs.pathExists(ymlPath)) {
+        const ymlContent = await fs.readFile(ymlPath, "utf-8");
+        const document = parseDocument(ymlContent);
+        const version = document.get("version") as string;
+        if (version <= "v1.7") {
+          document.set("version", "v1.8");
+          const docContent = document.toString();
+          const updatedContent = docContent.replace(
+            /(yaml-language-server:\s*\$schema=https:\/\/aka\.ms\/teams-toolkit\/)v\d+\.\d+(\/yaml\.schema\.json)/,
+            "$1v1.8$2"
+          );
+          await fs.writeFile(ymlPath, updatedContent, "utf8");
+        }
+      }
+    }
   }
 }

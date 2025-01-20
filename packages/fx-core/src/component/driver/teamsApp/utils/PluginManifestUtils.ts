@@ -3,6 +3,8 @@
 
 import {
   Colors,
+  DefaultApiSpecJsonFileName,
+  DefaultApiSpecYamlFileName,
   FxError,
   IPlugin,
   ManifestUtil,
@@ -27,6 +29,7 @@ import { SummaryConstant } from "../../../configManager/constant";
 import { EOL } from "os";
 import { ManifestType } from "../../../utils/envFunctionUtils";
 import { DriverContext } from "../../interface/commonArgs";
+import { isJsonSpecFile } from "../../../../common/utils";
 
 export class PluginManifestUtils {
   public async readPluginManifestFile(
@@ -168,6 +171,64 @@ export class PluginManifestUtils {
 
       return outputMessage;
     }
+  }
+
+  public async getDefaultNextAvailableApiSpecPath(
+    apiSpecPath: string,
+    apiSpecFolder: string,
+    apiSpecFileName?: string,
+    isKiotaIntegration = false
+  ) {
+    let isYaml = false;
+    try {
+      isYaml = !(await isJsonSpecFile(apiSpecPath));
+    } catch (e) {}
+
+    let openApiSpecFileName =
+      apiSpecFileName ?? (isYaml ? DefaultApiSpecYamlFileName : DefaultApiSpecJsonFileName);
+    // Check if the default file name already exists
+    if (!(await fs.pathExists(path.join(apiSpecFolder, openApiSpecFileName)))) {
+      return path.join(apiSpecFolder, openApiSpecFileName);
+    }
+
+    const openApiSpecFileNamePrefix = openApiSpecFileName.split(".")[0];
+    const openApiSpecFileType = openApiSpecFileName.split(".")[1];
+    let apiSpecFileNameSuffix = 1;
+    openApiSpecFileName = this.getApiSpecFileName(
+      openApiSpecFileNamePrefix,
+      openApiSpecFileType,
+      apiSpecFileNameSuffix,
+      isKiotaIntegration
+    );
+
+    while (await fs.pathExists(path.join(apiSpecFolder, openApiSpecFileName))) {
+      apiSpecFileNameSuffix++;
+      openApiSpecFileName = this.getApiSpecFileName(
+        openApiSpecFileNamePrefix,
+        openApiSpecFileType,
+        apiSpecFileNameSuffix,
+        isKiotaIntegration
+      );
+    }
+    const openApiSpecFilePath = path.join(apiSpecFolder, openApiSpecFileName);
+
+    return openApiSpecFilePath;
+  }
+
+  getApiSpecFileName(
+    openApiSpecFileNamePrefix: string,
+    openApiSpecFileType: string,
+    apiSpecFileNameSuffix: number,
+    isKiotaIntegration: boolean
+  ): string {
+    let openApiSpecFileName;
+    if (isKiotaIntegration) {
+      const apiSpecNameSplit = openApiSpecFileNamePrefix.split("-");
+      openApiSpecFileName = `${apiSpecNameSplit[0]}_${apiSpecFileNameSuffix}-${apiSpecNameSplit[1]}.${openApiSpecFileType}`;
+    } else {
+      openApiSpecFileName = `${openApiSpecFileNamePrefix}_${apiSpecFileNameSuffix}.${openApiSpecFileType}`;
+    }
+    return openApiSpecFileName;
   }
 
   async getApiSpecFilePathFromPlugin(

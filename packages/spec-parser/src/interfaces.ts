@@ -23,6 +23,8 @@ export interface ValidateResult {
    * An array of error results generated during validation.
    */
   errors: ErrorResult[];
+
+  specHash?: string;
 }
 
 export interface SpecValidationResult {
@@ -114,11 +116,8 @@ export enum ErrorType {
   PostBodyContainMultipleMediaTypes = "post-body-contain-multiple-media-types",
   ResponseContainMultipleMediaTypes = "response-contain-multiple-media-types",
   ResponseJsonIsEmpty = "response-json-is-empty",
-  PostBodySchemaIsNotJson = "post-body-schema-is-not-json",
   PostBodyContainsRequiredUnsupportedSchema = "post-body-contains-required-unsupported-schema",
   ParamsContainRequiredUnsupportedSchema = "params-contain-required-unsupported-schema",
-  ParamsContainsNestedObject = "params-contains-nested-object",
-  RequestBodyContainsNestedObject = "request-body-contains-nested-object",
   ExceededRequiredParamsLimit = "exceeded-required-params-limit",
   NoParameter = "no-parameter",
   NoAPIInfo = "no-api-info",
@@ -138,6 +137,9 @@ export enum WarningType {
   OperationOnlyContainsOptionalParam = "operation-only-contains-optional-param",
   ConvertSwaggerToOpenAPI = "convert-swagger-to-openapi",
   FuncDescriptionTooLong = "function-description-too-long",
+  OperationIdContainsSpecialCharacters = "operationid-contains-special-characters",
+  UnsupportedAuthType = "unsupported-auth-type",
+  GenerateJsonDataFailed = "generate-json-data-failed",
   Unknown = "unknown",
 }
 
@@ -326,4 +328,20 @@ export interface InferredProperties {
   title?: string;
   subtitle?: string;
   imageUrl?: string;
+}
+
+export interface ExistingPluginManifestInfo {
+  manifestPath: string;
+  specPath: string;
+}
+
+export interface OperationAuthInfoMap {
+  [operationId: string]: AuthInfo;
+}
+
+export interface FunctionClassificationMap {
+  [authType: string]: {
+    functionNames: string[];
+    authName: string;
+  };
 }

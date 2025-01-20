@@ -1,7 +1,7 @@
-# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.6/yaml.schema.json
+# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.8/yaml.schema.json
 # Visit https://aka.ms/teamsfx-v5.0-guide for details on this file
 # Visit https://aka.ms/teamsfx-actions for details on actions
-version: v1.6
+version: v1.8
 
 environmentFolderPath: ./env
 
@@ -75,6 +75,32 @@ provision:
       # will use bicep CLI in PATH if you remove this config.
       bicepCliVersion: v0.9.1
 
+  - uses: oauth/register
+    with:
+{{#MicrosoftEntra}}
+      name: aadAuthCode
+      flow: authorizationCode
+      appId: ${{TEAMS_APP_ID}}
+      clientId: ${{AAD_APP_CLIENT_ID}}
+      # Path to OpenAPI description document
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
+      identityProvider: MicrosoftEntra
+    writeToEnvironmentFile:
+      configurationId: AADAUTHCODE_CONFIGURATION_ID
+      applicationIdUri: AADAUTHCODE_APPLICATION_ID_URI
+{{/MicrosoftEntra}}
+{{^MicrosoftEntra}}
+      name: oAuth2AuthCode
+      flow: authorizationCode
+      appId: ${{TEAMS_APP_ID}}
+      clientId: ${{AAD_APP_CLIENT_ID}}
+      clientSecret: ${{SECRET_AAD_APP_CLIENT_SECRET}}
+      # Path to OpenAPI description document
+      apiSpecPath: ./appPackage/apiSpecificationFile/repair.yml
+    writeToEnvironmentFile:
+      configurationId: OAUTH2AUTHCODE_CONFIGURATION_ID
+{{/MicrosoftEntra}}
+
   # Apply the Microsoft Entra manifest to an existing Microsoft Entra app. Will use the object id in
   # manifest file to determine which Microsoft Entra app to update.
   - uses: aadApp/update
@@ -84,38 +110,13 @@ provision:
       manifestPath: ./aad.manifest.json
       outputFilePath: ./build/aad.manifest.${{TEAMSFX_ENV}}.json
 
-  - uses: oauth/register
-    with:
-{{#MicrosoftEntra}}
-      name: aadAuthCode
-      flow: authorizationCode
-      appId: ${{TEAMS_APP_ID}}
-      clientId: ${{AAD_APP_CLIENT_ID}}
-      # Path to OpenAPI description document
-      apiSpecPath: ./appPackage/apiSpecificationFile/repair.${{TEAMSFX_ENV}}.yml
-      identityProvider: MicrosoftEntra
-    writeToEnvironmentFile:
-      configurationId: AADAUTHCODE_CONFIGURATION_ID
-{{/MicrosoftEntra}}
-{{^MicrosoftEntra}}
-      name: oAuth2AuthCode
-      flow: authorizationCode
-      appId: ${{TEAMS_APP_ID}}
-      clientId: ${{AAD_APP_CLIENT_ID}}
-      clientSecret: ${{SECRET_AAD_APP_CLIENT_SECRET}}
-      # Path to OpenAPI description document
-      apiSpecPath: ./appPackage/apiSpecificationFile/repair.${{TEAMSFX_ENV}}.yml
-    writeToEnvironmentFile:
-      configurationId: OAUTH2AUTHCODE_CONFIGURATION_ID
-{{/MicrosoftEntra}}
-
   # Build Teams app package with latest env value
   - uses: teamsApp/zipAppPackage
     with:
       # Path to manifest template
       manifestPath: ./appPackage/manifest.json
       outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
-      outputJsonPath: ./appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+      outputFolder: ./appPackage/build
 
   # Validate app package using validation rules
   - uses: teamsApp/validateAppPackage
@@ -177,7 +178,7 @@ publish:
       # Path to manifest template
       manifestPath: ./appPackage/manifest.json
       outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
-      outputJsonPath: ./appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+      outputFolder: ./appPackage/build
   # Validate app package using validation rules
   - uses: teamsApp/validateAppPackage
     with:

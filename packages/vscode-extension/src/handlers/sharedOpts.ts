@@ -77,6 +77,10 @@ export async function runCommand(
         result = await core.buildAadManifest(inputs);
         break;
       }
+      case Stage.ConvertAadToNewSchema: {
+        result = await core.convertAadToNewSchema(inputs);
+        break;
+      }
       case Stage.publish: {
         result = await core.publishApplication(inputs);
         break;
@@ -106,6 +110,10 @@ export async function runCommand(
         result = await core.validateApplication(inputs);
         break;
       }
+      case Stage.syncManifest: {
+        result = await core.syncManifest(inputs);
+        break;
+      }
       case Stage.createAppPackage: {
         result = await core.createAppPackage(inputs);
         break;
@@ -116,6 +124,14 @@ export async function runCommand(
       }
       case Stage.addPlugin: {
         result = await core.addPlugin(inputs);
+        break;
+      }
+      case Stage.kiotaRegenerate: {
+        result = await core.kiotaRegenerate(inputs);
+        break;
+      }
+      case Stage.addAuthAction: {
+        result = await core.addAuthAction(inputs);
         break;
       }
       default:

@@ -65,6 +65,7 @@ import { entraAppUpdateCommand } from "../../src/commands/models/entraAppUpdate"
 import AzureTokenCIProvider from "../../src/commonlib/azureLoginCI";
 import { envResetCommand } from "../../src/commands/models/envReset";
 import { addPluginCommand } from "../../src/commands/models/addPlugin";
+import { addAuthConfigCommand } from "../../src/commands/models/addAuthConfig";
 
 describe("CLI commands", () => {
   const sandbox = sinon.createSandbox();
@@ -85,9 +86,6 @@ describe("CLI commands", () => {
 
   describe("getCreateCommand", async () => {
     it("happy path", async () => {
-      mockedEnvRestore = mockedEnv({
-        [FeatureFlags.CopilotExtension.name]: "false",
-      });
       sandbox.stub(activate, "getFxCore").returns(new FxCore({} as any));
       sandbox.stub(FxCore.prototype, "createProject").resolves(ok({ projectPath: "..." }));
 
@@ -99,40 +97,6 @@ describe("CLI commands", () => {
         telemetryProperties: {},
       };
 
-      const filteredQuestionNames = [
-        QuestionNames.WithPlugin.toString(),
-        QuestionNames.ApiPluginType.toString(),
-      ];
-      assert.isTrue(
-        ctx.command.options?.filter((o) => filteredQuestionNames.includes(o.name)).length === 0
-      );
-
-      const res = await getCreateCommand().handler!(ctx);
-      assert.isTrue(res.isOk());
-    });
-
-    it("createProjectOptions - need to adjust options when feature flag is enabled", async () => {
-      mockedEnvRestore = mockedEnv({
-        [FeatureFlags.CopilotExtension.name]: "true",
-      });
-      sandbox.stub(activate, "getFxCore").returns(new FxCore({} as any));
-      sandbox.stub(FxCore.prototype, "createProject").resolves(ok({ projectPath: "..." }));
-
-      const ctx: CLIContext = {
-        command: { ...getCreateCommand(), fullName: "new" },
-        optionValues: {},
-        globalOptionValues: {},
-        argumentValues: [],
-        telemetryProperties: {},
-      };
-
-      const filteredQuestionNames = [
-        QuestionNames.WithPlugin.toString(),
-        QuestionNames.ApiPluginType.toString(),
-      ];
-      assert.isTrue(
-        ctx.command.options?.filter((o) => filteredQuestionNames.includes(o.name)).length === 2
-      );
       const res = await getCreateCommand().handler!(ctx);
       assert.isTrue(res.isOk());
     });
@@ -283,12 +247,8 @@ describe("CLI commands", () => {
 
   describe("getAddCommand", async () => {
     it("customize GPT is enabled", async () => {
-      mockedEnvRestore = mockedEnv({
-        [FeatureFlags.CopilotExtension.name]: "true",
-      });
-
       const commands = addCommand();
-      assert.isTrue(commands.commands?.length === 2);
+      assert.isTrue(commands.commands?.length === 3);
     });
   });
 
@@ -924,6 +884,21 @@ describe("CLI commands", () => {
       assert.isTrue(res.isErr());
     });
   });
+
+  describe("addAuthConfigCommand", async () => {
+    it("success", async () => {
+      sandbox.stub(FxCore.prototype, "addAuthAction").resolves(ok(undefined));
+      const ctx: CLIContext = {
+        command: { ...addAuthConfigCommand, fullName: "add auth-config" },
+        optionValues: {},
+        globalOptionValues: {},
+        argumentValues: [],
+        telemetryProperties: {},
+      };
+      const res = await addAuthConfigCommand.handler!(ctx);
+      assert.isTrue(res.isOk());
+    });
+  });
 });
 
 describe("CLI read-only commands", () => {
@@ -961,8 +936,50 @@ describe("CLI read-only commands", () => {
     });
     it("outputM365Info login success", async () => {
       sandbox.stub(M365TokenProvider, "getJsonObject").resolves(ok({ upn: "fakename" }));
+      sandbox.stub(M365TokenProvider, "getTenant").resolves(undefined);
       const res = await accountUtils.outputM365Info("login");
       assert.isTrue(res);
+    });
+    context("outputM365Info login under hosting tenant", () => {
+      let mocks: RestoreFn;
+      beforeEach(() => {
+        mocks = mockedEnv({ TEAMSFX_MULTI_TENANT: "true" });
+        sandbox.stub(M365TokenProvider, "getJsonObject").resolves(ok({ unique_name: "fakename" }));
+        sandbox.stub(M365TokenProvider, "getTenant").resolves("faked_tenant_id");
+      });
+
+      afterEach(() => {
+        mocks();
+      });
+
+      it("specified tenant name displayed", async () => {
+        sandbox.stub(M365TokenProvider, "getAccessToken").resolves(ok("token"));
+        sandbox
+          .stub(tools, "listAllTenants")
+          .resolves([
+            { tenantId: "faked_tid_1" },
+            { tenantId: "faked_tenant_id", displayName: "Test tenant" },
+          ]);
+        const res = await accountUtils.outputM365Info("login", "faked_tenant_id");
+        assert.isTrue(res);
+      });
+
+      it("specified tenant not match", async () => {
+        sandbox.stub(M365TokenProvider, "getAccessToken").resolves(ok("token"));
+        sandbox
+          .stub(tools, "listAllTenants")
+          .resolves([{ tenantId: "faked_tid_1" }, { tenantId: "faked_tid_2" }]);
+        const res = await accountUtils.outputM365Info("login", "faked_tenant_id");
+        assert.isTrue(res);
+      });
+
+      it("failed to retrieve access token", async () => {
+        sandbox
+          .stub(M365TokenProvider, "getAccessToken")
+          .resolves(err("failed to get access token" as any));
+        const res = await accountUtils.outputM365Info("login", "faked_tenant_id");
+        assert.isTrue(res);
+      });
     });
     it("outputM365Info login fail", async () => {
       sandbox.stub(M365TokenProvider, "getJsonObject").resolves(err(new UserCancelError()));
@@ -971,6 +988,11 @@ describe("CLI read-only commands", () => {
     });
     it("outputM365Info show success", async () => {
       sandbox.stub(M365TokenProvider, "getJsonObject").resolves(ok({ upn: "fakename" }));
+      sandbox.stub(M365TokenProvider, "getTenant").resolves("faked_tenant_id");
+      sandbox.stub(M365TokenProvider, "getAccessToken").resolves(ok("token"));
+      sandbox
+        .stub(tools, "listAllTenants")
+        .resolves([{ tenantId: "faked_tid_1" }, { tenantId: "faked_tenant_id" }]);
       const res = await accountUtils.outputM365Info("show");
       assert.isTrue(res);
     });
@@ -986,6 +1008,59 @@ describe("CLI read-only commands", () => {
       sandbox.stub(AzureTokenCIProvider, "listSubscriptions").resolves([]);
       const res = await accountUtils.outputAzureInfo("login", undefined, true);
       assert.isTrue(res);
+    });
+    it("outputAzureInfo login with tenant parameter", async () => {
+      const mockedEnvRestore = mockedEnv({ TEAMSFX_MULTI_TENANT: "true" });
+      sandbox.stub(AzureTokenCIProvider, "load").resolves();
+      sandbox.stub(AzureTokenCIProvider, "init").resolves();
+      sandbox.stub(AzureTokenCIProvider, "switchTenant").resolves();
+      sandbox.stub(AzureTokenCIProvider, "getJsonObject").resolves({ unique_name: "test" });
+      sandbox.stub(AzureTokenCIProvider, "listSubscriptions").resolves([]);
+      sandbox.stub(AzureTokenCIProvider, "getTenant").resolves("faked_tenant_id");
+      sandbox.stub(AzureTokenCIProvider, "getIdentityCredentialAsync").resolves({
+        getToken: async () => {
+          return Promise.resolve({ token: "faked_token" });
+        },
+      } as any);
+      sandbox
+        .stub(tools, "listAllTenants")
+        .resolves([{ tenantId: "faked_tid_1" }, { tenantId: "faked_tenant_id" }]);
+      const res = await accountUtils.outputAzureInfo("login", "faked_tenant_id", true);
+      assert.isTrue(res);
+      mockedEnvRestore();
+    });
+    it("outputAzureInfo login fail with tenant parameter - invalid token", async () => {
+      const mockedEnvRestore = mockedEnv({ TEAMSFX_MULTI_TENANT: "true" });
+      sandbox.stub(AzureTokenCIProvider, "load").resolves();
+      sandbox.stub(AzureTokenCIProvider, "init").resolves();
+      sandbox.stub(AzureTokenCIProvider, "switchTenant").resolves();
+      sandbox.stub(AzureTokenCIProvider, "getJsonObject").resolves({ unique_name: "test" });
+      sandbox.stub(AzureTokenCIProvider, "listSubscriptions").resolves([]);
+      sandbox.stub(AzureTokenCIProvider, "getTenant").resolves("faked_tenant_id");
+      sandbox.stub(AzureTokenCIProvider, "getIdentityCredentialAsync").resolves(undefined);
+      const res = await accountUtils.outputAzureInfo("login", "faked_tenant_id", true);
+      assert.isTrue(res);
+      mockedEnvRestore();
+    });
+    it("outputAzureInfo login fail with tenant parameter - tenant mismatch", async () => {
+      const mockedEnvRestore = mockedEnv({ TEAMSFX_MULTI_TENANT: "true" });
+      sandbox.stub(AzureTokenCIProvider, "load").resolves();
+      sandbox.stub(AzureTokenCIProvider, "init").resolves();
+      sandbox.stub(AzureTokenCIProvider, "switchTenant").resolves();
+      sandbox.stub(AzureTokenCIProvider, "getJsonObject").resolves({ unique_name: "test" });
+      sandbox.stub(AzureTokenCIProvider, "listSubscriptions").resolves([]);
+      sandbox.stub(AzureTokenCIProvider, "getTenant").resolves("faked_tenant_id");
+      sandbox.stub(AzureTokenCIProvider, "getIdentityCredentialAsync").resolves({
+        getToken: async () => {
+          return Promise.resolve({ token: "faked_token" });
+        },
+      } as any);
+      sandbox
+        .stub(tools, "listAllTenants")
+        .resolves([{ tenantId: "faked_tid_1" }, { tenantId: "faked_tid_2" }]);
+      const res = await accountUtils.outputAzureInfo("login", "faked_tenant_id", true);
+      assert.isTrue(res);
+      mockedEnvRestore();
     });
     it("outputAzureInfo login fail", async () => {
       sandbox.stub(AzureTokenProvider, "getJsonObject").resolves(undefined);
@@ -1145,21 +1220,6 @@ describe("CLI read-only commands", () => {
       const res = await listTemplatesCommand.handler!(ctx);
       assert.isTrue(res.isOk());
     });
-    it("json", async () => {
-      mockedEnvRestore = mockedEnv({
-        [FeatureFlags.CopilotExtension.name]: "false",
-      });
-      const ctx: CLIContext = {
-        command: { ...listTemplatesCommand, fullName: "..." },
-        optionValues: { format: "json" },
-        globalOptionValues: {},
-        argumentValues: ["key", "value"],
-        telemetryProperties: {},
-      };
-      const res = await listTemplatesCommand.handler!(ctx);
-      assert.isTrue(res.isOk());
-      assert.isFalse(!!messages.find((msg) => msg.includes("api-plugin")));
-    });
     it("table with description", async () => {
       const ctx: CLIContext = {
         command: { ...listTemplatesCommand, fullName: "..." },
@@ -1181,22 +1241,6 @@ describe("CLI read-only commands", () => {
       };
       const res = await listTemplatesCommand.handler!(ctx);
       assert.isTrue(res.isOk());
-    });
-
-    it("json: Copilot plugin enabled", async () => {
-      mockedEnvRestore = mockedEnv({
-        [FeatureFlags.CopilotExtension.name]: "true",
-      });
-      const ctx: CLIContext = {
-        command: { ...listTemplatesCommand, fullName: "..." },
-        optionValues: { format: "json" },
-        globalOptionValues: {},
-        argumentValues: ["key", "value"],
-        telemetryProperties: {},
-      };
-      const res = await listTemplatesCommand.handler!(ctx);
-      assert.isTrue(res.isOk());
-      assert.isTrue(!!messages.find((msg) => msg.includes("api-plugin")));
     });
   });
   describe("listSamplesCommand", async () => {

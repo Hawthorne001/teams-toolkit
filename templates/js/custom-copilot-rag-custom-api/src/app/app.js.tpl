@@ -35,6 +35,7 @@ const app = new Application({
   storage,
   ai: {
     planner,
+    enable_feedback_loop: true,
   },
 });
 
@@ -47,10 +48,16 @@ app.conversationUpdate("membersAdded", async (turnContext) => {
   }
 });
 
+app.feedbackLoop(async (context, state, feedbackLoopData) => {
+  //add custom feedback process logic here
+  console.log("Your feedback is " + JSON.stringify(context.activity.value));
+});
+
 const { generateAdaptiveCard, addAuthConfig } = require("./utility.js");
 const yaml = require("js-yaml");
 const { OpenAPIClientAxios } = require("openapi-client-axios");
 const fs = require("fs-extra");
+const { Channels } = require("botbuilder")
 // Define a prompt function for getting the current status of the lights
 planner.prompts.addFunction("getAction", async (context, memory) => {
   const specFilePath = path.join(__dirname, "../prompts/chat/actions.json");

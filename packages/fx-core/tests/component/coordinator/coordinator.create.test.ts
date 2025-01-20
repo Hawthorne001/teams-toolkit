@@ -32,19 +32,27 @@ import {
 import { validationUtils } from "../../../src/ui/validationUtils";
 import { MockTools, randomAppName } from "../../core/utils";
 import { MockedUserInteraction } from "../../plugins/solution/util";
+import mockedEnv, { RestoreFn } from "mocked-env";
+import { FeatureFlagName } from "../../../src/common/featureFlags";
+import { manifestUtils } from "../../../src/component/driver/teamsApp/utils/ManifestUtils";
 
 describe("coordinator create", () => {
   const sandbox = sinon.createSandbox();
   const tools = new MockTools();
   let generator: sinon.SinonStub;
   setTools(tools);
+  let mockedEnvRestore: RestoreFn;
   beforeEach(() => {
     sandbox.stub(fs, "ensureDir").resolves();
+    sandbox.stub(manifestUtils, "trimManifestShortName").resolves(ok(undefined));
     generator = sandbox
       .stub(DefaultTemplateGenerator.prototype, <any>"scaffolding")
       .resolves(ok(undefined));
   });
   afterEach(() => {
+    if (mockedEnvRestore) {
+      mockedEnvRestore();
+    }
     sandbox.restore();
   });
 
@@ -467,7 +475,7 @@ describe("coordinator create", () => {
         [QuestionNames.ProjectType]: ProjectTypeOptions.me().id,
         [QuestionNames.Capabilities]: CapabilityOptions.m365SearchMe().id,
         [QuestionNames.MeArchitectureType]: MeArchitectureOptions.newApi().id,
-        [QuestionNames.ApiAuth]: ApiAuthOptions.apiKey().id,
+        [QuestionNames.ApiAuth]: ApiAuthOptions.bearerToken().id,
         [QuestionNames.AppName]: randomAppName(),
         [QuestionNames.Scratch]: ScratchOptions.yes().id,
       };
@@ -678,7 +686,7 @@ describe("coordinator create", () => {
       const inputs: Inputs = {
         platform: Platform.VSCode,
         folder: ".",
-        [QuestionNames.ProjectType]: ProjectTypeOptions.copilotExtension().id,
+        [QuestionNames.ProjectType]: ProjectTypeOptions.Agent().id,
         [QuestionNames.Capabilities]: CapabilityOptions.apiPlugin().id,
         [QuestionNames.ApiPluginType]: ApiPluginStartOptions.newApi().id,
         [QuestionNames.ApiAuth]: ApiAuthOptions.none().id,
@@ -697,7 +705,7 @@ describe("coordinator create", () => {
       const inputs: Inputs = {
         platform: Platform.VSCode,
         folder: ".",
-        [QuestionNames.ProjectType]: ProjectTypeOptions.copilotExtension().id,
+        [QuestionNames.ProjectType]: ProjectTypeOptions.Agent().id,
         [QuestionNames.Capabilities]: CapabilityOptions.apiPlugin().id,
         [QuestionNames.ApiPluginType]: ApiPluginStartOptions.newApi().id,
         [QuestionNames.ApiAuth]: ApiAuthOptions.apiKey().id,
@@ -716,7 +724,7 @@ describe("coordinator create", () => {
       const inputs: Inputs = {
         platform: Platform.VSCode,
         folder: ".",
-        [QuestionNames.ProjectType]: ProjectTypeOptions.copilotExtension().id,
+        [QuestionNames.ProjectType]: ProjectTypeOptions.Agent().id,
         [QuestionNames.Capabilities]: CapabilityOptions.apiPlugin().id,
         [QuestionNames.ApiPluginType]: ApiPluginStartOptions.newApi().id,
         [QuestionNames.ApiAuth]: ApiAuthOptions.oauth().id,
@@ -755,7 +763,7 @@ describe("coordinator create", () => {
       const inputs: Inputs = {
         platform: Platform.VSCode,
         folder: ".",
-        [QuestionNames.ProjectType]: ProjectTypeOptions.copilotExtension().id,
+        [QuestionNames.ProjectType]: ProjectTypeOptions.Agent().id,
         [QuestionNames.Capabilities]: CapabilityOptions.apiPlugin().id,
         [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
         [QuestionNames.AppName]: randomAppName(),
@@ -775,7 +783,7 @@ describe("coordinator create", () => {
       const inputs: Inputs = {
         platform: Platform.VSCode,
         folder: ".",
-        [QuestionNames.ProjectType]: ProjectTypeOptions.copilotExtension().id,
+        [QuestionNames.ProjectType]: ProjectTypeOptions.Agent().id,
         [QuestionNames.Capabilities]: CapabilityOptions.apiPlugin().id,
         [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
         [QuestionNames.AppName]: randomAppName(),
@@ -783,6 +791,49 @@ describe("coordinator create", () => {
       };
       const res = await coordinator.create(v3ctx, inputs);
       assert.isTrue(res.isErr());
+    });
+
+    it("success for kiota integration: plugin", async () => {
+      mockedEnvRestore = mockedEnv({
+        [FeatureFlagName.KiotaIntegration]: "true",
+      });
+      sandbox.stub(fs, "pathExists").resolves(true);
+      sandbox.stub(coordinator, "ensureTrackingId").resolves(ok("mock-id"));
+      const inputs: Inputs = {
+        platform: Platform.VSCode,
+        [QuestionNames.ProjectType]: ProjectTypeOptions.Agent().id,
+        [QuestionNames.Capabilities]: CapabilityOptions.apiPlugin().id,
+        [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      };
+      const context = createContext();
+      const res = await coordinator.create(context, inputs);
+      assert.isTrue(res.isOk());
+      if (res.isOk()) {
+        assert.isNotNull(res.value.lastCommand);
+        assert.equal(res.value.projectPath, "");
+      }
+    });
+
+    it("success for kiota integration: declarative copilot", async () => {
+      mockedEnvRestore = mockedEnv({
+        [FeatureFlagName.KiotaIntegration]: "true",
+      });
+      sandbox.stub(fs, "pathExists").resolves(true);
+      sandbox.stub(coordinator, "ensureTrackingId").resolves(ok("mock-id"));
+      const inputs: Inputs = {
+        platform: Platform.VSCode,
+        [QuestionNames.ProjectType]: ProjectTypeOptions.Agent().id,
+        [QuestionNames.Capabilities]: CapabilityOptions.declarativeAgent().id,
+        [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+        [QuestionNames.WithPlugin]: "yes",
+      };
+      const context = createContext();
+      const res = await coordinator.create(context, inputs);
+      assert.isTrue(res.isOk());
+      if (res.isOk()) {
+        assert.isNotNull(res.value.lastCommand);
+        assert.equal(res.value.projectPath, "");
+      }
     });
   });
 });

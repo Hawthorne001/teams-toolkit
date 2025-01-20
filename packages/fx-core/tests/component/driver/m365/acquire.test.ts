@@ -7,16 +7,13 @@ import chai from "chai";
 import fs from "fs-extra";
 import { PackageService } from "../../../../src/component/m365/packageService";
 import { M365TitleAcquireDriver } from "../../../../src/component/driver/m365/acquire";
-import {
-  MockedLogProvider,
-  MockedM365Provider,
-  MockedUserInteraction,
-} from "../../../plugins/solution/util";
+import { MockedLogProvider, MockedUserInteraction } from "../../../plugins/solution/util";
 import {
   FileNotFoundError,
   InvalidActionInputError,
   UnhandledError,
 } from "../../../../src/error/common";
+import { MockedM365Provider } from "../../../core/utils";
 
 describe("teamsApp/extendToM365", async () => {
   const acquireDriver = new M365TitleAcquireDriver();
@@ -146,7 +143,9 @@ describe("teamsApp/extendToM365", async () => {
       ["appId", "MY_APP_ID"],
     ]);
 
-    sinon.stub(PackageService.prototype, "sideLoading").resolves(["test-title-id", "test-app-id"]);
+    sinon
+      .stub(PackageService.prototype, "sideLoading")
+      .resolves(["test-title-id", "test-app-id", ""]);
     sinon.stub(fs, "pathExists").resolves(true);
 
     const result = await acquireDriver.execute(args, mockedDriverContext, outputEnvVarNames);

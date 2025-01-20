@@ -4,14 +4,10 @@ import { CLICommand } from "@microsoft/teamsfx-api";
 import { commands } from "../../resource";
 import { addSPFxWebpartCommand } from "./addSPFxWebpart";
 import { addPluginCommand } from "./addPlugin";
-import { isCopilotExtensionEnabled } from "@microsoft/teamsfx-core";
+import { addAuthConfigCommand } from "./addAuthConfig";
 
 const adjustCommands = (): CLICommand[] => {
-  if (isCopilotExtensionEnabled()) {
-    return [addSPFxWebpartCommand, addPluginCommand];
-  } else {
-    return [addSPFxWebpartCommand];
-  }
+  return [addSPFxWebpartCommand, addPluginCommand, addAuthConfigCommand];
 };
 export function addCommand(): CLICommand {
   return {

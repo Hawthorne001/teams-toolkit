@@ -7,6 +7,7 @@ import {
   ManifestUtils,
 } from "../../../../src/component/driver/teamsApp/utils/ManifestUtils";
 import fs from "fs-extra";
+import path from "path";
 import {
   TeamsAppManifest,
   InputsWithProjectPath,
@@ -14,6 +15,7 @@ import {
   Platform,
   ManifestCapability,
   IBot,
+  UserError,
 } from "@microsoft/teamsfx-api";
 import {
   getBotsTplBasedOnVersion,
@@ -25,6 +27,7 @@ import {
 } from "../../../../src/component/driver/teamsApp/constants";
 import { AppStudioError } from "../../../../src/component/driver/teamsApp/errors";
 import { FileNotFoundError, JSONSyntaxError, ReadFileError } from "../../../../src/error";
+import mockedEnv, { RestoreFn } from "mocked-env";
 
 const latestManifestVersion = "1.17";
 const oldManifestVersion = "1.16";
@@ -251,6 +254,92 @@ describe("ManifestUtils", () => {
     const result = await manifestUtils.addCapabilities(inputs, capabilities);
     assert.isTrue(result.isOk());
   });
+  it("getPluginFilePath success", async () => {
+    const mockManifest = {
+      copilotAgents: {
+        plugins: [
+          {
+            id: "id-fake",
+            file: "fake",
+          },
+        ],
+      },
+    };
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(mockManifest as any));
+    sinon.stub(fs, "pathExists").resolves(true);
+    const res = await manifestUtils.getPluginFilePath(mockManifest as any, "fake");
+    assert.isTrue(res.isOk());
+  });
+  it("getPluginFilePath error 1", async () => {
+    const mockManifest = {};
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(mockManifest as any));
+    const res = await manifestUtils.getPluginFilePath(mockManifest as any, "fake");
+    assert.isTrue(res.isErr());
+    if (res.isErr()) {
+      assert.isTrue(res.error instanceof UserError);
+    }
+  });
+  it("getPluginFilePath error 2", async () => {
+    const mockManifest = {
+      copilotAgents: {},
+    };
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(mockManifest as any));
+    const res = await manifestUtils.getPluginFilePath(mockManifest as any, "fake");
+    assert.isTrue(res.isErr());
+    if (res.isErr()) {
+      assert.isTrue(res.error instanceof UserError);
+    }
+  });
+  it("getPluginFilePath error 3", async () => {
+    const mockManifest = {
+      copilotAgents: {
+        plugins: [],
+      },
+    };
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(mockManifest as any));
+    const res = await manifestUtils.getPluginFilePath(mockManifest as any, "fake");
+    assert.isTrue(res.isErr());
+    if (res.isErr()) {
+      assert.isTrue(res.error instanceof UserError);
+    }
+  });
+  it("getPluginFilePath error 4", async () => {
+    const mockManifest = {
+      copilotAgents: {
+        plugins: [undefined],
+      },
+    };
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(mockManifest as any));
+    const res = await manifestUtils.getPluginFilePath(mockManifest as any, "fake");
+    assert.isTrue(res.isErr());
+    if (res.isErr()) {
+      assert.isTrue(res.error instanceof UserError);
+    }
+  });
+  it("getPluginFilePath error 5", async () => {
+    const mockManifest = {
+      copilotExtensions: {},
+    };
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(mockManifest as any));
+    const res = await manifestUtils.getPluginFilePath(mockManifest as any, "fake");
+    assert.isTrue(res.isErr());
+    if (res.isErr()) {
+      assert.isTrue(res.error instanceof UserError);
+    }
+  });
+  it("getPluginFilePath error 6", async () => {
+    const mockManifest = {
+      copilotExtensions: {
+        plugins: [],
+      },
+    };
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(mockManifest as any));
+    const res = await manifestUtils.getPluginFilePath(mockManifest as any, "fake");
+    assert.isTrue(res.isErr());
+    if (res.isErr()) {
+      assert.isTrue(res.error instanceof UserError);
+    }
+  });
 });
 
 function mockInputManifestFile(manifestUtils: ManifestUtils, manifestVersion: string) {
@@ -346,5 +435,146 @@ describe("readAppManifestSync", () => {
 
     const res = manifestUtils.readAppManifestSync("projectPath");
     assert.isTrue(res.isErr() && res.error instanceof ReadFileError);
+  });
+});
+
+describe("getTeamsAppManifestPath", () => {
+  const sandbox = sinon.createSandbox();
+  const projectPath = "projectPath";
+
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  it("return manifest path under appManifest", () => {
+    sandbox.stub(fs, "existsSync").returns(true);
+    const res = manifestUtils.getTeamsAppManifestPath(projectPath);
+    assert.equal(res, path.join(projectPath, "appManifest", "manifest.json"));
+  });
+
+  it("return manifest path under root directory", () => {
+    sandbox.stub(fs, "existsSync").callsFake((inputPath) => {
+      if (inputPath === path.join(projectPath, "appManifest", "manifest.json")) {
+        return false;
+      }
+      return true;
+    });
+    const res = manifestUtils.getTeamsAppManifestPath(projectPath);
+    assert.equal(res, path.join(projectPath, "manifest.json"));
+  });
+
+  it("return manifest path under appPackage", () => {
+    sandbox.stub(fs, "existsSync").returns(false);
+    const res = manifestUtils.getTeamsAppManifestPath(projectPath);
+    assert.equal(res, path.join(projectPath, "appPackage", "manifest.json"));
+  });
+});
+
+describe("trimManifestShortName", () => {
+  const sandbox = sinon.createSandbox();
+
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  it("Success", async () => {
+    const teamsManifest = new TeamsAppManifest();
+    teamsManifest.name.short = "shortname abcdefghijklmn123456${{APP_NAME_SUFFIX}}";
+    sandbox.stub(fs, "readJson").resolves(teamsManifest);
+    sandbox.stub(fs, "writeFile").resolves();
+    sandbox.stub(fs, "pathExistsSync").returns(true);
+    const res = await manifestUtils.trimManifestShortName("projectPath");
+    assert.isTrue(res.isOk());
+    assert.equal(teamsManifest.name.short, "shortnameabcdefghijklmn12${{APP_NAME_SUFFIX}}");
+  });
+  it("Success no suffix", async () => {
+    const teamsManifest = new TeamsAppManifest();
+    teamsManifest.name.short = "shortname abcdefghijklmn123456";
+    sandbox.stub(fs, "readJson").resolves(teamsManifest);
+    sandbox.stub(fs, "writeFile").resolves();
+    sandbox.stub(fs, "pathExistsSync").returns(true);
+    const res = await manifestUtils.trimManifestShortName("projectPath");
+    assert.isTrue(res.isOk());
+    assert.equal(teamsManifest.name.short, "shortnameabcdefghijklmn12");
+  });
+  it("No need to trim", async () => {
+    const teamsManifest = new TeamsAppManifest();
+    teamsManifest.name.short = "shortname abcdefghijklmn${{APP_NAME_SUFFIX}}";
+    const readJsonStub = sandbox.stub(fs, "readJson").resolves(teamsManifest);
+    const writeFileStub = sandbox.stub(fs, "writeFile").resolves();
+    sandbox.stub(fs, "pathExistsSync").returns(true);
+    const res = await manifestUtils.trimManifestShortName("projectPath");
+    assert.isTrue(res.isOk());
+    assert.isTrue(readJsonStub.calledOnce);
+    assert.isTrue(writeFileStub.notCalled);
+    assert.equal(teamsManifest.name.short, "shortname abcdefghijklmn${{APP_NAME_SUFFIX}}");
+  });
+  it("No manifest", async () => {
+    const teamsManifest = new TeamsAppManifest();
+    teamsManifest.name.short = "shortname abcdefghijklmn${{APP_NAME_SUFFIX}}";
+    const readJsonStub = sandbox.stub(fs, "readJson").resolves(teamsManifest);
+    const writeFileStub = sandbox.stub(fs, "writeFile").resolves();
+    sandbox.stub(fs, "pathExistsSync").returns(false);
+    const res = await manifestUtils.trimManifestShortName("projectPath");
+    assert.isTrue(res.isOk());
+    assert.isTrue(readJsonStub.notCalled);
+    assert.isTrue(writeFileStub.notCalled);
+  });
+});
+
+describe("resolveLocFile", () => {
+  const sandbox = sinon.createSandbox();
+  let mockedEnvRestore: RestoreFn;
+
+  afterEach(() => {
+    if (mockedEnvRestore) {
+      mockedEnvRestore();
+    }
+    sandbox.restore();
+  });
+
+  it("returns error when loc file doesn't exist", async () => {
+    sandbox.stub(fs, "pathExists").resolves(false);
+
+    const locFile = await manifestUtils.resolveLocFile("loc_file_path");
+
+    assert.isTrue(locFile.isErr());
+    if (locFile.isErr()) {
+      assert.equal(locFile.error.name, "FileNotFoundError");
+    }
+  });
+
+  it("returns error when there're unresolved env variables", async () => {
+    sandbox.stub(fs, "pathExists").resolves(true);
+    const fakedLocManifest = new TeamsAppManifest();
+    fakedLocManifest.name.short = "shortname ${{APP_NAME_SUFFIX}}";
+    sandbox.stub(fs, "readFile").resolves(JSON.stringify(fakedLocManifest) as any);
+
+    const locFile = await manifestUtils.resolveLocFile("loc_file_path");
+
+    assert.isTrue(locFile.isErr());
+    if (locFile.isErr()) {
+      assert.equal(locFile.error.name, "MissingEnvironmentVariablesError");
+    }
+  });
+
+  it("happy pass", async () => {
+    sandbox.stub(fs, "pathExists").resolves(true);
+    const fakedLocManifest = new TeamsAppManifest();
+    fakedLocManifest.name.short = "shortname ${{APP_NAME_SUFFIX}}";
+    mockedEnvRestore = mockedEnv({
+      ["APP_NAME_SUFFIX"]: "- hello world",
+    });
+    sandbox.stub(fs, "readFile").resolves(JSON.stringify(fakedLocManifest) as any);
+
+    const locFile = await manifestUtils.resolveLocFile("loc_file_path");
+
+    assert.isTrue(locFile.isOk());
+    if (locFile.isOk()) {
+      assert.equal(
+        (JSON.parse(locFile.value) as TeamsAppManifest).name.short,
+        "shortname - hello world"
+      );
+    }
   });
 });

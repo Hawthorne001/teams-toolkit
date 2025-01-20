@@ -21,6 +21,10 @@ import {
   selectTeamsAppManifestQuestionNode,
   uninstallQuestionNode,
   validateTeamsAppQuestionNode,
+  syncManifestQuestionNode,
+  kiotaRegenerateQuestion,
+  convertAadToNewSchemaQuestionNode,
+  addAuthActionQuestion,
 } from "./other";
 export * from "./constants";
 export * from "./create";
@@ -58,6 +62,9 @@ export class QuestionNodes {
   deployAadManifest(): IQTreeNode {
     return deployAadManifestQuestionNode();
   }
+  convertAadToNewSchema(): IQTreeNode {
+    return convertAadToNewSchemaQuestionNode();
+  }
   createNewEnv(): IQTreeNode {
     return createNewEnvQuestionNode();
   }
@@ -75,6 +82,15 @@ export class QuestionNodes {
   }
   uninstall(): IQTreeNode {
     return uninstallQuestionNode();
+  }
+  syncManifest(): IQTreeNode {
+    return syncManifestQuestionNode();
+  }
+  kiotaRegenerate(): IQTreeNode {
+    return kiotaRegenerateQuestion();
+  }
+  addAuthAction(): IQTreeNode {
+    return addAuthActionQuestion();
   }
 }
 

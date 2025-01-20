@@ -6,6 +6,7 @@
  */
 
 import {
+  AdaptiveCardGenerator,
   ProjectType,
   SpecParser,
   SpecParserError,
@@ -15,6 +16,10 @@ import {
   AppPackageFolderName,
   AuthInfo,
   Context,
+  DefaultApiSpecFolderName,
+  DefaultApiSpecJsonFileName,
+  DefaultApiSpecYamlFileName,
+  DefaultPluginManifestFileName,
   FxError,
   GeneratorResult,
   Inputs,
@@ -23,6 +28,8 @@ import {
   ResponseTemplatesFolderName,
   Result,
   SystemError,
+  TeamsAppManifest,
+  UserError,
   Warning,
   err,
   ok,
@@ -48,19 +55,19 @@ import { DefaultTemplateGenerator } from "../templates/templateGenerator";
 import { TemplateInfo } from "../templates/templateInfo";
 import {
   convertSpecParserErrorToFxError,
-  defaultApiSpecFolderName,
-  defaultApiSpecJsonFileName,
-  defaultApiSpecYamlFileName,
-  defaultPluginManifestFileName,
+  copyKiotaFolder,
   generateFromApiSpec,
   generateScaffoldingSummary,
   getEnvName,
   getParserOptions,
-  isYamlSpecFile,
+  listOperations,
+  updateDeclarativeAgentManifest,
   updateForCustomApi,
 } from "./helper";
 import { copilotGptManifestUtils } from "../../driver/teamsApp/utils/CopilotGptManifestUtils";
 import { declarativeCopilotInstructionFileName } from "../constant";
+import { isJsonSpecFile } from "../../../common/utils";
+import { getLocalizedString } from "../../../common/localizeUtils";
 
 const defaultDeclarativeCopilotActionId = "action_1";
 // const fromApiSpecComponentName = "copilot-plugin-existing-api";
@@ -73,7 +80,7 @@ const copilotPluginExistingApiSpecUrlTelemetryEvent = "copilot-plugin-existing-a
 const apiPluginFromApiSpecTemplateName = "api-plugin-existing-api";
 
 const failedToUpdateCustomApiTemplateErrorName = "failed-to-update-custom-api-template";
-const defaultDeclarativeCopilotManifestFileName = "declarativeCopilot.json";
+const defaultDeclarativeCopilotManifestFileName = "declarativeAgent.json";
 
 const enum telemetryProperties {
   templateName = "template-name",
@@ -125,7 +132,7 @@ export class SpecGenerator extends DefaultTemplateGenerator {
     let templateName = "";
     if (
       (capability === CapabilityOptions.apiPlugin().id ||
-        capability === CapabilityOptions.declarativeCopilot().id) &&
+        capability === CapabilityOptions.declarativeAgent().id) &&
       inputs[QuestionNames.ApiPluginType] === ApiPluginStartOptions.apiSpec().id
     ) {
       templateName = apiPluginFromApiSpecTemplateName;
@@ -162,11 +169,35 @@ export class SpecGenerator extends DefaultTemplateGenerator {
       authData = inputs.apiAuthData;
     }
     const isDeclarativeCopilot =
-      inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeCopilot().id;
+      inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeAgent().id;
     merge(actionContext?.telemetryProps, {
       [telemetryProperties.templateName]: getTemplateInfosState.templateName,
       [telemetryProperties.isDeclarativeCopilot]: isDeclarativeCopilot.toString(),
     });
+
+    // For Kiota integration, we need to get auth info here
+    const isKiotaIntegration =
+      featureFlagManager.getBooleanValue(FeatureFlags.KiotaIntegration) &&
+      inputs[QuestionNames.ApiPluginManifestPath];
+    if (isKiotaIntegration) {
+      const operationsResult = await listOperations(
+        context,
+        inputs[QuestionNames.ApiSpecLocation],
+        inputs
+      );
+      if (operationsResult.isErr()) {
+        const errorMsg = getLocalizedString("error.kiota.FailedToGenerateAuthActions");
+        void context.userInteraction.showMessage("warn", errorMsg, false);
+        context.logProvider.warning(errorMsg);
+      } else {
+        const operations = operationsResult.value;
+        const authApi = operations.filter((api) => !!api.data.authName);
+        if (authApi.length > 0) {
+          authData = authApi.map((api) => api.data);
+        }
+      }
+    }
+
     const appName = inputs[QuestionNames.AppName];
     let language = inputs[QuestionNames.ProgrammingLanguage] as ProgrammingLanguage;
     if (getTemplateInfosState.templateName !== forCustomCopilotRagCustomApi) {
@@ -185,12 +216,12 @@ export class SpecGenerator extends DefaultTemplateGenerator {
         : ProjectType.SME;
 
     try {
-      getTemplateInfosState.isYaml = await isYamlSpecFile(getTemplateInfosState.url);
+      getTemplateInfosState.isYaml = !(await isJsonSpecFile(getTemplateInfosState.url));
     } catch (e) {}
 
     const openapiSpecFileName = getTemplateInfosState.isYaml
-      ? defaultApiSpecYamlFileName
-      : defaultApiSpecJsonFileName;
+      ? DefaultApiSpecYamlFileName
+      : DefaultApiSpecJsonFileName;
     const llmService: string | undefined = inputs[QuestionNames.LLMService];
     const openAIKey: string | undefined = inputs[QuestionNames.OpenAIKey];
     const azureOpenAIKey: string | undefined = inputs[QuestionNames.AzureOpenAIKey];
@@ -204,30 +235,43 @@ export class SpecGenerator extends DefaultTemplateGenerator {
       azureOpenAIEndpoint,
       azureOpenAIDeploymentName,
     };
-    if (authData?.authName) {
-      const envName = getEnvName(authData.authName, authData.authType);
-      context.templateVariables = Generator.getDefaultVariables(
-        appName,
-        safeProjectNameFromVS,
-        inputs.targetFramework,
-        inputs.placeProjectFileInSolutionDir === "true",
-        {
-          authName: authData.authName,
-          openapiSpecPath: normalizePath(
-            path.join(AppPackageFolderName, defaultApiSpecFolderName, openapiSpecFileName)
-          ),
+
+    const auths = [];
+
+    const openapiSpecPath = isKiotaIntegration
+      ? normalizePath(
+          path.join(AppPackageFolderName, path.basename(inputs[QuestionNames.ApiSpecLocation]))
+        )
+      : normalizePath(
+          path.join(AppPackageFolderName, DefaultApiSpecFolderName, openapiSpecFileName)
+        );
+
+    if (authData && authData.length > 0) {
+      for (const auth of authData) {
+        const envName = getEnvName(auth.authName!);
+        auths.push({
+          authName: auth.authName!,
+          openapiSpecPath: openapiSpecPath,
           registrationIdEnvName: envName,
-          authType: authData.authType,
-        },
-        llmServiceData
-      );
+          authType: auth.authType,
+        });
+
+        context.templateVariables = Generator.getDefaultVariables(
+          appName,
+          safeProjectNameFromVS,
+          inputs.targetFramework,
+          inputs.placeProjectFileInSolutionDir === "true",
+          auths,
+          llmServiceData
+        );
+      }
     } else {
       context.templateVariables = Generator.getDefaultVariables(
         appName,
         safeProjectNameFromVS,
         inputs.targetFramework,
         inputs.placeProjectFileInSolutionDir === "true",
-        undefined,
+        [],
         llmServiceData
       );
     }
@@ -236,7 +280,7 @@ export class SpecGenerator extends DefaultTemplateGenerator {
         getTemplateInfosState.url
       ).toString(),
       [telemetryProperties.generateType]: getTemplateInfosState.type.toString(),
-      [telemetryProperties.authType]: authData?.authName ?? "None",
+      [telemetryProperties.authType]: authData?.map((item) => item.authType).join(",") ?? "None",
     });
     inputs.getTemplateInfosState = getTemplateInfosState;
     return ok([
@@ -246,15 +290,12 @@ export class SpecGenerator extends DefaultTemplateGenerator {
         replaceMap: {
           ...context.templateVariables,
           DeclarativeCopilot: isDeclarativeCopilot ? "true" : "",
-          FileFunction: featureFlagManager.getBooleanValue(FeatureFlags.EnvFileFunc) ? "true" : "",
         },
         filterFn: (fileName: string) => {
           if (fileName.includes(`${defaultDeclarativeCopilotManifestFileName}.tpl`)) {
             return isDeclarativeCopilot;
           } else if (fileName.includes(declarativeCopilotInstructionFileName)) {
-            return (
-              isDeclarativeCopilot && featureFlagManager.getBooleanValue(FeatureFlags.EnvFileFunc)
-            );
+            return isDeclarativeCopilot;
           }
           {
             return true;
@@ -273,7 +314,10 @@ export class SpecGenerator extends DefaultTemplateGenerator {
     try {
       const getTemplateInfosState = inputs.getTemplateInfosState as TemplateInfosState;
       const isDeclarativeCopilot =
-        inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeCopilot().id;
+        inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeAgent().id;
+      const isKiotaIntegration =
+        featureFlagManager.getBooleanValue(FeatureFlags.KiotaIntegration) &&
+        !!inputs[QuestionNames.ApiPluginManifestPath];
       const manifestPath = path.join(
         destinationPath,
         AppPackageFolderName,
@@ -282,24 +326,98 @@ export class SpecGenerator extends DefaultTemplateGenerator {
       const apiSpecFolderPath = path.join(
         destinationPath,
         AppPackageFolderName,
-        defaultApiSpecFolderName
+        isKiotaIntegration ? "" : DefaultApiSpecFolderName
       );
-      const openapiSpecFileName = getTemplateInfosState.isYaml
-        ? defaultApiSpecYamlFileName
-        : defaultApiSpecJsonFileName;
-      const openapiSpecPath = path.join(apiSpecFolderPath, openapiSpecFileName);
+      const openapiSpecFileName = isKiotaIntegration
+        ? path.basename(inputs[QuestionNames.ApiSpecLocation])
+        : getTemplateInfosState.isYaml
+        ? DefaultApiSpecYamlFileName
+        : DefaultApiSpecJsonFileName;
+
+      let openapiSpecPath = path.join(apiSpecFolderPath, openapiSpecFileName);
+
+      if (getTemplateInfosState.templateName === forCustomCopilotRagCustomApi) {
+        const language = inputs[QuestionNames.ProgrammingLanguage] as ProgrammingLanguage;
+        if (language === ProgrammingLanguage.CSharp) {
+          openapiSpecPath = path.join(
+            destinationPath,
+            DefaultApiSpecFolderName,
+            openapiSpecFileName
+          );
+        }
+      }
 
       await fs.ensureDir(apiSpecFolderPath);
 
       let warnings: WarningResult[];
       const pluginManifestPath =
         getTemplateInfosState.type === ProjectType.Copilot
-          ? path.join(destinationPath, AppPackageFolderName, defaultPluginManifestFileName)
+          ? path.join(
+              destinationPath,
+              AppPackageFolderName,
+              isKiotaIntegration
+                ? path.basename(inputs[QuestionNames.ApiPluginManifestPath])
+                : DefaultPluginManifestFileName
+            )
           : undefined;
       const responseTemplateFolder =
         getTemplateInfosState.type === ProjectType.SME
           ? path.join(destinationPath, AppPackageFolderName, ResponseTemplatesFolderName)
           : undefined;
+
+      if (isKiotaIntegration) {
+        // For Kiota integration scenario, we need to:
+        // 1. Copy openapi spec file
+        await fs.copyFile(inputs[QuestionNames.ApiSpecLocation].trim(), openapiSpecPath);
+
+        // 2. Copy plugin manifest file
+        await fs.copyFile(inputs[QuestionNames.ApiPluginManifestPath], pluginManifestPath!);
+
+        // 3. Update teams app manifest
+        const manifest: TeamsAppManifest = await fs.readJSON(manifestPath);
+        const apiPluginRelativePath = path.relative(manifestPath, pluginManifestPath!);
+        manifest.copilotAgents = manifest.copilotAgents || {};
+        manifest.copilotAgents.plugins = [
+          {
+            file: apiPluginRelativePath,
+            id: "plugin_1",
+          },
+        ];
+
+        // 4. add action in da manifest
+        const addActionResult = await updateDeclarativeAgentManifest(
+          manifestPath,
+          defaultDeclarativeCopilotManifestFileName,
+          defaultDeclarativeCopilotActionId,
+          pluginManifestPath!
+        );
+        if (addActionResult.isErr()) {
+          return err(addActionResult.error);
+        }
+
+        // 5. Update plugin manifest to add auth info (optional)
+        try {
+          const specParser = new SpecParser(
+            openapiSpecPath,
+            getParserOptions(getTemplateInfosState.type, isDeclarativeCopilot)
+          );
+          const operation = (await specParser.list()).APIs.filter((value) => value.isValid).map(
+            (value) => value.api
+          );
+          await specParser.generateAdaptiveCardInPlugin(pluginManifestPath!, operation, undefined);
+        } catch (error) {
+          // create ac error, should not block the whole process
+          const errorMsg = getLocalizedString("error.kiota.FailedToCreateAdaptiveCard");
+          void context.userInteraction.showMessage("warn", errorMsg, false);
+          context.logProvider.warning(errorMsg);
+        }
+
+        // 5. Copy .kiota folder
+        await copyKiotaFolder(inputs[QuestionNames.ApiPluginManifestPath], destinationPath);
+
+        return ok({ warnings: undefined });
+      }
+
       const specParser = new SpecParser(
         getTemplateInfosState.url,
         getParserOptions(getTemplateInfosState.type, isDeclarativeCopilot)
@@ -323,17 +441,14 @@ export class SpecGenerator extends DefaultTemplateGenerator {
         warnings = generateResult.value.warnings;
       }
       if (isDeclarativeCopilot) {
-        const gptManifestPath = path.join(
-          path.dirname(manifestPath),
-          defaultDeclarativeCopilotManifestFileName
-        );
-        const addAcionResult = await copilotGptManifestUtils.addAction(
-          gptManifestPath,
+        const addActionResult = await updateDeclarativeAgentManifest(
+          manifestPath,
+          defaultDeclarativeCopilotManifestFileName,
           defaultDeclarativeCopilotActionId,
-          defaultPluginManifestFileName
+          pluginManifestPath!
         );
-        if (addAcionResult.isErr()) {
-          return err(addAcionResult.error);
+        if (addActionResult.isErr()) {
+          return err(addActionResult.error);
         }
       }
 
@@ -342,7 +457,13 @@ export class SpecGenerator extends DefaultTemplateGenerator {
         const spec = specs[1];
         try {
           const language = inputs[QuestionNames.ProgrammingLanguage] as ProgrammingLanguage;
-          await updateForCustomApi(spec, language, destinationPath, openapiSpecFileName);
+          const updateWarnings = await updateForCustomApi(
+            spec,
+            language,
+            destinationPath,
+            openapiSpecFileName
+          );
+          warnings.push(...updateWarnings);
         } catch (error: any) {
           throw new SystemError(
             this.componentName,

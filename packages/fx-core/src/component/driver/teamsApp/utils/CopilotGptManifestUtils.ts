@@ -11,6 +11,7 @@ import {
   IDeclarativeCopilot,
   Platform,
   Colors,
+  DefaultPluginManifestFileName,
 } from "@microsoft/teamsfx-api";
 import fs from "fs-extra";
 import { FileNotFoundError, JSONSyntaxError, WriteFileError } from "../../../../error/common";
@@ -28,6 +29,7 @@ import { SummaryConstant } from "../../../configManager/constant";
 import { EOL } from "os";
 import { ManifestType } from "../../../utils/envFunctionUtils";
 import { DriverContext } from "../../interface/commonArgs";
+import { manifestUtils } from "./ManifestUtils";
 
 export class CopilotGptManifestUtils {
   public async readCopilotGptManifestFile(
@@ -144,6 +146,30 @@ export class CopilotGptManifestUtils {
     }
   }
 
+  public async getManifestPath(teamsManifestPath: string): Promise<Result<string, FxError>> {
+    const teamsManifestRes = await manifestUtils._readAppManifest(teamsManifestPath);
+
+    if (teamsManifestRes.isErr()) {
+      return err(teamsManifestRes.error);
+    }
+    const filePath = teamsManifestRes.value.copilotExtensions
+      ? teamsManifestRes.value.copilotExtensions.declarativeCopilots?.[0].file
+      : teamsManifestRes.value.copilotAgents?.declarativeAgents?.[0].file;
+    if (!filePath) {
+      return err(
+        AppStudioResultFactory.UserError(
+          AppStudioError.TeamsAppRequiredPropertyMissingError.name,
+          AppStudioError.TeamsAppRequiredPropertyMissingError.message(
+            "copilotExtensions.declarativeCopilots.file",
+            teamsManifestPath
+          )
+        )
+      );
+    } else {
+      return ok(path.resolve(path.dirname(teamsManifestPath), filePath));
+    }
+  }
+
   public async addAction(
     copilotGptPath: string,
     id: string,
@@ -161,6 +187,33 @@ export class CopilotGptManifestUtils {
         id,
         file: pluginFile,
       });
+
+      const actionPath = path.join(path.dirname(copilotGptPath), pluginFile);
+      const actionManifest = await fs.readJson(actionPath);
+      const conversationStarters = actionManifest.capabilities?.conversation_starters;
+
+      if (conversationStarters) {
+        if (!gptManifest.conversation_starters) {
+          gptManifest.conversation_starters = [];
+        }
+
+        for (const starter of conversationStarters) {
+          if (gptManifest.conversation_starters.length >= 6) {
+            break;
+          }
+          if (
+            !gptManifest.conversation_starters.some(
+              (existingStarter) => existingStarter.text === starter.text
+            )
+          ) {
+            gptManifest.conversation_starters.push(starter);
+          }
+        }
+
+        delete actionManifest.capabilities.conversation_starters;
+        await fs.writeJson(actionPath, actionManifest, { spaces: 4 });
+      }
+
       const updateGptManifestRes = await copilotGptManifestUtils.writeCopilotGptManifestFile(
         gptManifest,
         copilotGptPath
@@ -260,6 +313,47 @@ export class CopilotGptManifestUtils {
 
       return outputMessage;
     }
+  }
+
+  public async getDefaultNextAvailablePluginManifestPath(
+    folder: string,
+    pluginManifestFileName = DefaultPluginManifestFileName,
+    isKiotaIntegration = false
+  ) {
+    if (!(await fs.pathExists(path.join(folder, pluginManifestFileName)))) {
+      return path.join(folder, pluginManifestFileName);
+    }
+    const pluginManifestNamePrefix = pluginManifestFileName.split(".")[0];
+    let pluginFileNameSuffix = 1;
+    let pluginManifestName = this.getPluginManifestFileName(
+      pluginManifestNamePrefix,
+      pluginFileNameSuffix,
+      isKiotaIntegration
+    );
+    while (await fs.pathExists(path.join(folder, pluginManifestName))) {
+      pluginFileNameSuffix++;
+      pluginManifestName = this.getPluginManifestFileName(
+        pluginManifestNamePrefix,
+        pluginFileNameSuffix,
+        isKiotaIntegration
+      );
+    }
+    return path.join(folder, pluginManifestName);
+  }
+
+  getPluginManifestFileName(
+    pluginManifestNamePrefix: string,
+    pluginFileNameSuffix: number,
+    isKiotaIntegration: boolean
+  ) {
+    let pluginManifestName;
+    if (isKiotaIntegration) {
+      const pluginManifestNameSplit = pluginManifestNamePrefix.split("-");
+      pluginManifestName = `${pluginManifestNameSplit[0]}_${pluginFileNameSuffix}-${pluginManifestNameSplit[1]}.json`;
+    } else {
+      pluginManifestName = `${pluginManifestNamePrefix}_${pluginFileNameSuffix}.json`;
+    }
+    return pluginManifestName;
   }
 }
 

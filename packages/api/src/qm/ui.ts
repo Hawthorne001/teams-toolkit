@@ -39,7 +39,7 @@ export interface UIConfig<T> {
   /**
    * default input value
    */
-  default?: T | (() => Promise<T>);
+  default?: T | (() => Promise<T>) | string;
 
   /**
    * A function that will be called to validate input and to give a hint to the user.
@@ -58,6 +58,17 @@ export interface UIConfig<T> {
    * @param `command` is the command name that will be executed when current action triggered
    */
   buttons?: { icon: string; tooltip: string; command: string }[];
+
+  /**
+   * `innerStep` and `innerTotalStep` are used to describe the inner step of a group of questions
+   * `innerStep` is the sequence number of the current question in the group.
+   *  VSC will display the innerStep and innerTotalStep in the question title.
+   */
+  innerStep?: number;
+  /**
+   * `innerTotalStep` is the number of questions in the group in total
+   */
+  innerTotalStep?: number;
 }
 
 export interface ConfirmConfig extends UIConfig<boolean> {
@@ -99,7 +110,7 @@ export interface MultiSelectConfig extends UIConfig<string[]> {
    */
   options: StaticOptions | (() => Promise<StaticOptions>);
 
-  default?: string[] | (() => Promise<string[]>);
+  default?: string[] | (() => Promise<string[]>) | "none" | "all";
 
   /**
    * This config only works for option items with `OptionItem[]` type. If `returnObject` is true, the answer value is an array of `OptionItem` objects; otherwise, the answer value is an array of `id` strings.
@@ -171,6 +182,11 @@ export type SelectFileConfig = UIConfig<string> & {
     label: string;
     description?: string;
   }[];
+
+  /**
+   * Default Uri when open file selector window.
+   */
+  defaultFolder?: string | (() => Promise<string>);
 };
 
 /**

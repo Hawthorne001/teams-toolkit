@@ -15,12 +15,8 @@
             "sample-localdebug-query-org",
             "sample-localdebug-stock-update",
             "sample-localdebug-incoming-webhook",
-            "basic-tab-debug-upgrade-debug",
-            "bot-debug-upgrade-debug",
-            "bot-upgrade-debug",
             "sample-remotedebug-todo-list-with-spfx",
             "sample-remotedebug-todo-list-with-m365",
-            "sample-localdebug-react-retail-dashboard",
             "sample-localdebug-spfx-productivity-dashboard",
             "sample-remotedebug-react-retail-dashboard",
             "sample-remotedebug-spfx-productivity-dashboard",
@@ -34,22 +30,11 @@
             "remotedebug-chatdata-m365-js-azureopenai",
             "remotedebug-chatdata-m365-js-openai",
             "remotedebug-chatdata-m365-ts-azureopenai",
-            "remotedebug-chatdata-m365-ts-openai"
-        ]
-    },
-    {
-        "os": {
-            "windows-latest": {
-                "node-18": []
-            },
-            "ubuntu-latest": {
-                "node-18": []
-            },
-            "macos-latest": {
-                "node-18": []
-            }
-        },
-        "cases": [
+            "remotedebug-chatdata-m365-ts-openai",
+            "sample-localdebug-outlook-signature",
+            "sample-remotedebug-outlook-signature",
+            "sample-localdebug-reddit-link",
+            "sample-remotedebug-reddit-link",
             "sample-localdebug-chef-bot",
             "sample-remotedebug-chef-bot"
         ]
@@ -65,12 +50,11 @@
         },
         "cases": [
             "sample-localdebug-hello-world-tab-with-backend",
-            "sample-localdebug-graph-connector-bot",
-            "sample-localdebug-bot-sso",
             "sample-localdebug-dice-roller",
             "sample-localdebug-contact-exporter",
             "sample-localdebug-hello-world-meeting",
-            "basic-tab-upgrade-debug"
+            "sample-localdebug-food-catalog",
+            "sample-remotedebug-food-catalog"
         ]
     },
     {
@@ -95,8 +79,8 @@
             "sample-remotedebug-hello-world-tab-outlook",
             "sample-remotedebug-bot-sso",
             "sample-remotedebug-sso-tab-via-apim-proxy",
-            "basic-tab-upgrade-provision-debug",
-            "bot-upgrade-provision-debug"
+            "sample-localdebug-graph-connector-bot",
+            "sample-localdebug-bot-sso"
         ]
     },
     {
@@ -113,7 +97,6 @@
             "sample-localdebug-hello-world-tab-outlook",
             "sample-localdebug-one-productivity-hub",
             "sample-localdebug-assistant-dashboard",
-            "sample-localdebug-large-scale-notification",
             "sample-localdebug-todo-list-sql",
             "sample-remotedebug-share-now",
             "sample-remotedebug-todo-list-sql",
@@ -122,10 +105,11 @@
             "sample-remotedebug-bot-sso-docker",
             "sample-localdebug-hello-world-tab-docker",
             "sample-remotedebug-hello-world-tab-docker",
-            "basic-tab-provision-upgrade-provision-debug",
-            "bot-provision-upgrade-provision-debug",
             "sample-localdebug-todo-list-with-spfx",
-            "sample-localdebug-todo-list-with-m365"
+            "sample-localdebug-todo-list-with-m365",
+            "sample-localdebug-react-retail-dashboard",
+            "sample-localdebug-intelligent-data-chart",
+            "sample-remotedebug-intelligent-data-chart"
         ]
     },
     {

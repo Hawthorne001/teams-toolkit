@@ -15,6 +15,8 @@ import {
   SingleSelectQuestion,
   TextInputQuestion,
   FolderQuestion,
+  CLIPlatforms,
+  PluginManifestSchema,
 } from "@microsoft/teamsfx-api";
 import fs from "fs-extra";
 import * as path from "path";
@@ -22,17 +24,13 @@ import { AppStudioScopes, ConstantString } from "../common/constants";
 import { FeatureFlags, featureFlagManager } from "../common/featureFlags";
 import { getLocalizedString } from "../common/localizeUtils";
 import { Constants } from "../component/driver/add/utility/constants";
-import { AppStudioError } from "../component/driver/teamsApp/errors";
-import { AppStudioResultFactory } from "../component/driver/teamsApp/results";
-import { manifestUtils } from "../component/driver/teamsApp/utils/ManifestUtils";
-import { getAbsolutePath } from "../component/utils/common";
 import { envUtil } from "../component/utils/envUtil";
 import { CollaborationConstants, CollaborationUtil } from "../core/collaborator";
 import { environmentNameManager } from "../core/environmentName";
 import { TOOLS } from "../common/globalVars";
 import {
+  ApiPluginStartOptions,
   HubOptions,
-  PluginAvailabilityOptions,
   QuestionNames,
   TeamsAppValidationOptions,
 } from "./constants";
@@ -40,10 +38,15 @@ import {
   SPFxFrameworkQuestion,
   SPFxImportFolderQuestion,
   SPFxWebpartNameQuestion,
+  apiAuthQuestion,
   apiOperationQuestion,
+  apiPluginStartQuestion,
   apiSpecLocationQuestion,
+  pluginApiSpecQuestion,
+  pluginManifestQuestion,
 } from "./create";
 import { UninstallInputs } from "./inputs";
+import * as os from "os";
 
 export function listCollaboratorQuestionNode(): IQTreeNode {
   const selectTeamsAppNode = selectTeamsAppManifestQuestionNode();
@@ -98,6 +101,32 @@ export function grantPermissionQuestionNode(): IQTreeNode {
           selectAadAppNode,
           {
             data: inputUserEmailQuestion(),
+          },
+        ],
+      },
+    ],
+  };
+}
+
+export function convertAadToNewSchemaQuestionNode(): IQTreeNode {
+  return {
+    data: { type: "group" },
+    children: [
+      {
+        condition: (inputs: Inputs) =>
+          DynamicPlatforms.includes(inputs.platform) &&
+          !inputs[QuestionNames.AadAppManifestFilePath],
+        data: selectAadManifestQuestion(),
+        children: [
+          {
+            condition: (inputs: Inputs) =>
+              inputs.platform === Platform.VSCode && // confirm question only works for VSC
+              inputs.projectPath !== undefined &&
+              path.resolve(inputs[QuestionNames.AadAppManifestFilePath]) !==
+                path.join(inputs.projectPath, "aad.manifest.json"),
+            data: confirmManifestQuestion(false, false),
+            cliOptionDisabled: "self",
+            inputsDisabled: "self",
           },
         ],
       },
@@ -738,56 +767,173 @@ export function createNewEnvQuestionNode(): IQTreeNode {
   };
 }
 
-export function selectPluginAvailabilityQuestion(): SingleSelectQuestion {
+// add Plugin to a declarative Copilot project
+export function addPluginQuestionNode(): IQTreeNode {
   return {
-    name: QuestionNames.PluginAvailability,
-    title: getLocalizedString("core.question.pluginAvailability.title"),
-    cliDescription: "Select plugin availability.",
-    type: "singleSelect",
-    staticOptions: PluginAvailabilityOptions.all(),
-    dynamicOptions: async (inputs: Inputs) => {
-      const teamsManifestPath = inputs[QuestionNames.TeamsAppManifestFilePath];
-      const absolutePath = getAbsolutePath(teamsManifestPath, inputs.projectPath!);
-      const manifestRes = await manifestUtils._readAppManifest(absolutePath);
-      if (manifestRes.isErr()) {
-        throw manifestRes.error;
-      }
-      const commonProperties = ManifestUtil.parseCommonProperties(manifestRes.value);
-      if (!commonProperties.capabilities.includes("copilotGpt")) {
-        throw AppStudioResultFactory.UserError(
-          AppStudioError.TeamsAppRequiredPropertyMissingError.name,
-          AppStudioError.TeamsAppRequiredPropertyMissingError.message(
-            "declarativeCopilots",
-            teamsManifestPath
-          )
-        );
-      }
+    data: apiPluginStartQuestion(true),
+    children: [
+      {
+        data: pluginManifestQuestion(),
+        condition: {
+          equals: ApiPluginStartOptions.existingPlugin().id,
+        },
+      },
+      {
+        data: pluginApiSpecQuestion(),
+        condition: {
+          equals: ApiPluginStartOptions.existingPlugin().id,
+        },
+      },
+      {
+        data: apiSpecLocationQuestion(),
+        condition: (inputs: Inputs) => {
+          return (
+            !featureFlagManager.getBooleanValue(FeatureFlags.KiotaIntegration) &&
+            inputs[QuestionNames.ApiPluginType] === ApiPluginStartOptions.apiSpec().id
+          );
+        },
+      },
+      {
+        data: apiOperationQuestion(true, true),
+        condition: (inputs: Inputs) => {
+          return (
+            !featureFlagManager.getBooleanValue(FeatureFlags.KiotaIntegration) &&
+            inputs[QuestionNames.ApiPluginType] === ApiPluginStartOptions.apiSpec().id
+          );
+        },
+      },
+      {
+        data: selectTeamsAppManifestQuestion(),
+      },
+    ],
+  };
+}
 
-      if (commonProperties.capabilities.includes("plugin")) {
-        // A project can have only one plugin.
-        return [PluginAvailabilityOptions.action()];
-      } else {
-        return PluginAvailabilityOptions.all();
-      }
+export function kiotaRegenerateQuestion(): IQTreeNode {
+  return {
+    data: selectTeamsAppManifestQuestion(),
+  };
+}
+
+export function addAuthActionQuestion(): IQTreeNode {
+  return {
+    data: pluginManifestQuestion(),
+    children: [
+      {
+        data: apiSpecFromPluginManifestQuestion(),
+        condition: async (inputs: Inputs) => {
+          const pluginManifestPath = inputs[QuestionNames.PluginManifestFilePath];
+          if (!!!pluginManifestPath) {
+            return false;
+          }
+          const pluginManifest = (await fs.readJson(
+            pluginManifestPath as string
+          )) as PluginManifestSchema;
+          const specs = pluginManifest
+            .runtimes!.filter((runtime) => runtime.type === "OpenApi")
+            .map((runtime) => runtime.spec.url);
+          if (specs.length === 1) {
+            inputs[QuestionNames.ApiSpecLocation] = specs[0];
+            return false;
+          }
+          return true;
+        },
+      },
+      {
+        data: apiFromPluginManifestQuestion(),
+        condition: async (inputs: Inputs) => {
+          const pluginManifestPath = inputs[QuestionNames.PluginManifestFilePath];
+          const apiSpecPath = inputs[QuestionNames.ApiSpecLocation];
+          if (!!!pluginManifestPath || !!!apiSpecPath) {
+            return false;
+          }
+          const pluginManifest = (await fs.readJson(
+            pluginManifestPath as string
+          )) as PluginManifestSchema;
+          const apis: string[] = [];
+          pluginManifest
+            .runtimes!.filter(
+              (runtime) => runtime.type === "OpenApi" && runtime.spec.url === apiSpecPath
+            )
+            .forEach((runtime) => {
+              apis.push(...(runtime.run_for_functions as string[]));
+            });
+          if (apis.length === 1) {
+            inputs[QuestionNames.ApiOperation] = apis;
+            return false;
+          }
+          return true;
+        },
+      },
+      {
+        data: authNameQuestion(),
+      },
+      {
+        data: apiAuthQuestion(true),
+      },
+    ],
+  };
+}
+
+export function apiSpecFromPluginManifestQuestion(): SingleSelectQuestion {
+  return {
+    name: QuestionNames.ApiSpecLocation,
+    title: getLocalizedString("core.addAuthActionQuestion.ApiSpecLocation.title"),
+    placeholder: getLocalizedString("core.addAuthActionQuestion.ApiSpecLocation.placeholder"),
+    type: "singleSelect",
+    staticOptions: [],
+    cliDescription: "OpenAPI specification to add Auth configuration.",
+    dynamicOptions: async (inputs: Inputs) => {
+      const pluginManifestPath = inputs[QuestionNames.PluginManifestFilePath];
+      const pluginManifest = (await fs.readJson(pluginManifestPath)) as PluginManifestSchema;
+      const specs = pluginManifest
+        .runtimes!.filter((runtime) => runtime.type === "OpenApi")
+        .map((runtime) => runtime.spec.url as string);
+      return [...new Set(specs)];
     },
   };
 }
 
-// add Plugin to a declarative Copilot project
-export function addPluginQuestionNode(): IQTreeNode {
+export function apiFromPluginManifestQuestion(): MultiSelectQuestion {
   return {
-    data: selectTeamsAppManifestQuestion(),
-    children: [
-      {
-        data: selectPluginAvailabilityQuestion(),
+    name: QuestionNames.ApiOperation,
+    title: getLocalizedString("core.addAuthActionQuestion.ApiOperation.title"),
+    type: "multiSelect",
+    staticOptions: [],
+    placeholder: getLocalizedString("core.addAuthActionQuestion.ApiOperation.placeholder"),
+    cliDescription: "API to add Auth configuration.",
+    dynamicOptions: async (inputs: Inputs) => {
+      const pluginManifestPath = inputs[QuestionNames.PluginManifestFilePath];
+      const apiSpecPath = inputs[QuestionNames.ApiSpecLocation];
+      const pluginManifest = (await fs.readJson(pluginManifestPath)) as PluginManifestSchema;
+      const apis: string[] = [];
+      pluginManifest
+        .runtimes!.filter(
+          (runtime) => runtime.type === "OpenApi" && runtime.spec.url === apiSpecPath
+        )
+        .forEach((runtime) => {
+          apis.push(...(runtime.run_for_functions as string[]));
+        });
+      return [...new Set(apis)];
+    },
+  };
+}
+
+export function authNameQuestion(): TextInputQuestion {
+  return {
+    name: QuestionNames.AuthName,
+    title: getLocalizedString("core.addAuthActionQuestion.authName.title"),
+    type: "text",
+    cliDescription: "Name of Auth Configuration.",
+    additionalValidationOnAccept: {
+      validFunc: (input: string, inputs?: Inputs): string | undefined => {
+        if (!inputs) {
+          throw new Error("inputs is undefined"); // should never happen
+        }
+        inputs[QuestionNames.ApiPluginType] = ApiPluginStartOptions.newApi().id;
+        return;
       },
-      {
-        data: apiSpecLocationQuestion(),
-      },
-      {
-        data: apiOperationQuestion(true, true),
-      },
-    ],
+    },
   };
 }
 
@@ -806,6 +952,7 @@ export function apiSpecApiKeyQuestion(): IQTreeNode {
       type: "text",
       name: QuestionNames.ApiSpecApiKey,
       cliShortName: "k",
+      password: true,
       title: getLocalizedString("core.createProjectQuestion.ApiKey"),
       cliDescription: "Api key for OpenAPI spec.",
       forgetLastValue: true,
@@ -1042,6 +1189,7 @@ function oauthClientSecretQuestion(): TextInputQuestion {
     type: "text",
     name: QuestionNames.OauthClientSecret,
     cliShortName: "c",
+    password: true,
     title: getLocalizedString("core.createProjectQuestion.OauthClientSecret"),
     cliDescription: "Oauth client secret for OpenAPI spec.",
     forgetLastValue: true,
@@ -1064,5 +1212,44 @@ function oauthClientSecretQuestion(): TextInputQuestion {
         return;
       },
     },
+  };
+}
+
+export function syncManifestQuestionNode(): IQTreeNode {
+  return {
+    data: {
+      type: "group",
+    },
+    children: [
+      {
+        data: {
+          type: "folder",
+          name: QuestionNames.ProjectPath,
+          title: getLocalizedString("core.syncManifest.projectPath"),
+          cliDescription: "Project Path",
+          placeholder: "./",
+          default: (inputs: Inputs) =>
+            CLIPlatforms.includes(inputs.platform)
+              ? "./"
+              : path.join(os.homedir(), ConstantString.RootFolder),
+        },
+      },
+      {
+        data: {
+          type: "text",
+          name: QuestionNames.Env,
+          title: getLocalizedString("core.syncManifest.env"),
+          cliDescription: "Target Teams Toolkit Environment",
+        },
+      },
+      {
+        data: {
+          type: "text",
+          name: QuestionNames.TeamsAppId,
+          title: getLocalizedString("core.syncManifest.teamsAppId"),
+          cliDescription: "Teams App ID (optional)",
+        },
+      },
+    ],
   };
 }

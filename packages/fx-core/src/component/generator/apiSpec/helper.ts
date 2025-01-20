@@ -9,6 +9,7 @@ import {
   AdaptiveCardGenerator,
   ErrorResult as ApiSpecErrorResult,
   ErrorType as ApiSpecErrorType,
+  ConstantString,
   ErrorType,
   InvalidAPIInfo,
   ListAPIResult,
@@ -21,7 +22,7 @@ import {
   WarningResult,
   WarningType,
 } from "@microsoft/m365-spec-parser";
-import { ListAPIInfo } from "@microsoft/m365-spec-parser/dist/src/interfaces";
+import { AuthType, ListAPIInfo } from "@microsoft/m365-spec-parser/dist/src/interfaces";
 import {
   ApiOperation,
   AppPackageFolderName,
@@ -55,23 +56,31 @@ import {
 import { SummaryConstant } from "../../configManager/constant";
 import { manifestUtils } from "../../driver/teamsApp/utils/ManifestUtils";
 import { pluginManifestUtils } from "../../driver/teamsApp/utils/PluginManifestUtils";
-import { sendTelemetryErrorEvent, TelemetryProperty } from "../../../common/telemetry";
+import {
+  ApiSpecTelemetryPropertis,
+  sendTelemetryErrorEvent,
+  TelemetryProperty,
+} from "../../../common/telemetry";
 import * as util from "util";
-import axios from "axios";
+import { SpecParserSource } from "../../../common/constants";
+import { MetadataV3 } from "../../../common/versionMetadata";
+import { ActionInjector, AuthActionInjectResult } from "../../configManager/actionInjector";
+import { copilotGptManifestUtils } from "../../driver/teamsApp/utils/CopilotGptManifestUtils";
 
 const enum telemetryProperties {
   validationStatus = "validation-status",
   validationErrors = "validation-errors",
-  specNotValidDetails = "spec-not-valid-details",
   validationWarnings = "validation-warnings",
   validApisCount = "valid-apis-count",
   allApisCount = "all-apis-count",
+  specHash = "spec-hash",
   bearerTokenAuthCount = "bearer-token-auth-count",
   oauth2AuthCount = "oauth2-auth-count",
   otherAuthCount = "other-auth-count",
   isFromAddingApi = "is-from-adding-api",
   failedReason = "failed-reason",
   generateType = "generate-type",
+  projectType = "project-type",
 }
 
 const enum telemetryEvents {
@@ -80,14 +89,18 @@ const enum telemetryEvents {
   failedToGetGenerateWarning = "failed-to-get-generate-warning",
 }
 
-export function getParserOptions(type: ProjectType, isDeclarativeCopilot?: boolean): ParseOptions {
+export function getParserOptions(
+  type: ProjectType,
+  isDeclarativeCopilot?: boolean,
+  platform?: string
+): ParseOptions {
   return type === ProjectType.Copilot
     ? {
         isGptPlugin: isDeclarativeCopilot,
         allowAPIKeyAuth: false,
-        allowBearerTokenAuth: true,
+        allowBearerTokenAuth: !!platform && platform === Platform.VS ? false : true,
         allowMultipleParameters: true,
-        allowOauth2: true,
+        allowOauth2: !!platform && platform === Platform.VS ? false : true,
         projectType: ProjectType.Copilot,
         allowMissingId: true,
         allowSwagger: true,
@@ -108,7 +121,7 @@ export function getParserOptions(type: ProjectType, isDeclarativeCopilot?: boole
       }
     : {
         projectType: type,
-        allowBearerTokenAuth: true, // Currently, API key auth support is actually bearer token auth
+        allowBearerTokenAuth: !!platform && platform === Platform.VS ? false : true, // Currently, API key auth support is actually bearer token auth
         allowMultipleParameters: true,
         allowOauth2: featureFlagManager.getBooleanValue(FeatureFlags.SMEOAuth),
       };
@@ -120,11 +133,6 @@ export const specParserGenerateResultWarningsTelemetryProperty = "warnings";
 
 export const invalidApiSpecErrorName = "invalid-api-spec";
 const apiSpecNotUsedInPlugin = "api-spec-not-used-in-plugin";
-
-export const defaultApiSpecFolderName = "apiSpecificationFile";
-export const defaultApiSpecYamlFileName = "openapi.yaml";
-export const defaultApiSpecJsonFileName = "openapi.json";
-export const defaultPluginManifestFileName = "ai-plugin.json";
 
 export interface ErrorResult {
   /**
@@ -148,9 +156,7 @@ export async function listOperations(
   shouldLogWarning = true,
   existingCorrelationId?: string
 ): Promise<Result<ApiOperation[], ErrorResult[]>> {
-  const isPlugin =
-    inputs[QuestionNames.ApiPluginType] === apiPluginApiSpecOptionId ||
-    !!inputs[QuestionNames.PluginAvailability];
+  const isPlugin = inputs[QuestionNames.ApiPluginType] === apiPluginApiSpecOptionId;
   const isCustomApi =
     inputs[QuestionNames.CustomCopilotRag] === CustomCopilotRagOptions.customApi().id;
   const projectType = isPlugin
@@ -160,16 +166,21 @@ export async function listOperations(
     : ProjectType.SME;
 
   try {
-    const specParser = new SpecParser(apiSpecUrl as string, getParserOptions(projectType));
+    const specParser = new SpecParser(
+      apiSpecUrl as string,
+      getParserOptions(projectType, undefined, inputs.platform)
+    );
     const validationRes = await specParser.validate();
     validationRes.errors = formatValidationErrors(validationRes.errors, inputs);
 
     logValidationResults(
+      projectType,
       validationRes.errors,
       validationRes.warnings,
       context,
       shouldLogWarning,
       false,
+      validationRes.specHash,
       existingCorrelationId
     );
     if (validationRes.status === ValidationStatus.Error) {
@@ -211,6 +222,7 @@ export async function listOperations(
       [telemetryProperties.bearerTokenAuthCount]: bearerTokenAuthAPIs.length.toString(),
       [telemetryProperties.oauth2AuthCount]: oauth2AuthAPIs.length.toString(),
       [telemetryProperties.otherAuthCount]: otherAuthAPIs.length.toString(),
+      [telemetryProperties.specHash]: validationRes.specHash!,
     });
 
     // Filter out exsiting APIs
@@ -255,7 +267,16 @@ export async function listOperations(
             inputs
           );
 
-          logValidationResults(errors, [], context, true, false, existingCorrelationId);
+          logValidationResults(
+            projectType,
+            errors,
+            [],
+            context,
+            true,
+            false,
+            validationRes.specHash,
+            existingCorrelationId
+          );
           return err(errors);
         }
 
@@ -273,7 +294,16 @@ export async function listOperations(
             ],
             inputs
           );
-          logValidationResults(errors, [], context, true, false, existingCorrelationId);
+          logValidationResults(
+            projectType,
+            errors,
+            [],
+            context,
+            true,
+            false,
+            validationRes.specHash,
+            existingCorrelationId
+          );
           return err(errors);
         }
       } else {
@@ -306,14 +336,19 @@ function sortOperations(operations: ListAPIInfo[]): ApiOperation[] {
         ? getLocalizedString("core.copilotPlugin.api.apiKeyAuth")
         : Utils.isOAuthWithAuthCodeFlow(operation.auth.authScheme)
         ? getLocalizedString("core.copilotPlugin.api.oauth")
-        : "",
+        : Utils.isAPIKeyAuthButNotInCookie(operation.auth.authScheme)
+        ? getLocalizedString("core.copilotPlugin.api.apiKeyWithHeaderOrQuery")
+        : getLocalizedString("core.copilotPlugin.api.notSupportedAuth"),
       data: {
         serverUrl: operation.server,
       },
     };
 
     if (operation.auth) {
-      if (Utils.isBearerTokenAuth(operation.auth.authScheme)) {
+      if (
+        Utils.isBearerTokenAuth(operation.auth.authScheme) ||
+        Utils.isAPIKeyAuthButNotInCookie(operation.auth.authScheme)
+      ) {
         result.data.authType = "apiKey";
         result.data.authName = operation.auth.name;
       } else if (Utils.isOAuthWithAuthCodeFlow(operation.auth.authScheme)) {
@@ -415,7 +450,15 @@ export async function generateFromApiSpec(
   }
 
   if (validationRes.status === ValidationStatus.Error) {
-    logValidationResults(validationRes.errors, warnings, context, false, true);
+    logValidationResults(
+      projectType,
+      validationRes.errors,
+      warnings,
+      context,
+      false,
+      true,
+      validationRes.specHash
+    );
     const errorMessage =
       inputs.platform === Platform.VSCode
         ? getLocalizedString(
@@ -473,11 +516,13 @@ export async function generateFromApiSpec(
 }
 
 export function logValidationResults(
+  projectType: ProjectType,
   errors: ErrorResult[],
   warnings: WarningResult[],
   context: Context,
   shouldLogWarning: boolean,
   shouldSkipTelemetry: boolean,
+  specHash?: string,
   existingCorrelationId?: string
 ): void {
   if (!shouldSkipTelemetry) {
@@ -490,11 +535,16 @@ export function logValidationResults(
       [telemetryProperties.validationWarnings]: warnings
         .map((warn: WarningResult) => formatTelemetryValidationProperty(warn))
         .join(";"),
+      [telemetryProperties.projectType]: projectType.toString(),
     };
+
+    if (specHash) {
+      properties[telemetryProperties.specHash] = specHash;
+    }
 
     const specNotValidError = errors.find((error) => error.type === ErrorType.SpecNotValid);
     if (specNotValidError) {
-      properties[telemetryProperties.specNotValidDetails] = specNotValidError.content;
+      properties[ApiSpecTelemetryPropertis.SpecNotValidDetails] = specNotValidError.content;
     }
 
     if (existingCorrelationId) {
@@ -546,6 +596,59 @@ export function logValidationResults(
     );
 
   void context.logProvider.info(outputMessage);
+}
+
+export async function injectAuthAction(
+  projectPath: string,
+  authName: string,
+  authScheme: AuthType | undefined,
+  outputApiSpecPath: string,
+  forceToAddNew: boolean,
+  authType?: string
+): Promise<AuthActionInjectResult | undefined> {
+  const ymlPath = path.join(projectPath, MetadataV3.configFile);
+  const localYamlPath = path.join(projectPath, MetadataV3.localConfigFile);
+
+  const relativeSpecPath = "./" + path.relative(projectPath, outputApiSpecPath).replace(/\\/g, "/");
+
+  if ((!!authScheme && Utils.isBearerTokenAuth(authScheme)) || authType === "ApiKeyPluginVault") {
+    const res = await ActionInjector.injectCreateAPIKeyAction(
+      ymlPath,
+      authName,
+      relativeSpecPath,
+      forceToAddNew
+    );
+
+    if (await fs.pathExists(localYamlPath)) {
+      await ActionInjector.injectCreateAPIKeyAction(
+        localYamlPath,
+        authName,
+        relativeSpecPath,
+        forceToAddNew
+      );
+    }
+    return res;
+  } else if (
+    (!!authScheme && Utils.isOAuthWithAuthCodeFlow(authScheme)) ||
+    authType === "OAuth2PluginVault"
+  ) {
+    const res = await ActionInjector.injectCreateOAuthAction(
+      ymlPath,
+      authName,
+      relativeSpecPath,
+      forceToAddNew
+    );
+
+    if (await fs.pathExists(localYamlPath)) {
+      await ActionInjector.injectCreateOAuthAction(
+        localYamlPath,
+        authName,
+        relativeSpecPath,
+        forceToAddNew
+      );
+    }
+    return res;
+  }
 }
 
 /**
@@ -640,6 +743,20 @@ function formatApiSpecValidationWarningMessage(
         )
     );
   }
+
+  const specialCharactersWarnings = specWarnings.filter(
+    (w) => w.type === WarningType.OperationIdContainsSpecialCharacters
+  );
+
+  specialCharactersWarnings.forEach((warning) => {
+    resultWarnings.push(
+      getLocalizedString(
+        "core.copilotPlugin.scaffold.summary.warning.operationIdContainsSpecialCharacters",
+        warning.data.operationId,
+        warning.data.operationId.replace(/[^a-zA-Z0-9]/g, "_")
+      )
+    );
+  });
 
   return resultWarnings;
 }
@@ -824,26 +941,12 @@ function formatLengthExceedingErrorMessage(field: string, limit: number): string
 }
 
 export function convertSpecParserErrorToFxError(error: SpecParserError): FxError {
-  return new SystemError("SpecParser", error.errorType.toString(), error.message, error.message);
-}
-
-export async function isYamlSpecFile(specPath: string): Promise<boolean> {
-  if (specPath.endsWith(".yaml") || specPath.endsWith(".yml")) {
-    return true;
-  } else if (specPath.endsWith(".json")) {
-    return false;
-  }
-  const isRemoteFile = specPath.startsWith("http:") || specPath.startsWith("https:");
-  const fileContent = isRemoteFile
-    ? (await axios.get(specPath)).data
-    : await fs.readFile(specPath, "utf-8");
-
-  try {
-    JSON.parse(fileContent);
-    return false;
-  } catch (error) {
-    return true;
-  }
+  return new SystemError(
+    SpecParserSource,
+    error.errorType.toString(),
+    error.message,
+    error.message
+  );
 }
 
 export function formatValidationErrors(
@@ -871,18 +974,12 @@ function mapInvalidReasonToMessage(reason: ErrorType): string {
       return getLocalizedString("core.common.invalidReason.ResponseContainMultipleMediaTypes");
     case ErrorType.ResponseJsonIsEmpty:
       return getLocalizedString("core.common.invalidReason.ResponseJsonIsEmpty");
-    case ErrorType.PostBodySchemaIsNotJson:
-      return getLocalizedString("core.common.invalidReason.PostBodySchemaIsNotJson");
     case ErrorType.PostBodyContainsRequiredUnsupportedSchema:
       return getLocalizedString(
         "core.common.invalidReason.PostBodyContainsRequiredUnsupportedSchema"
       );
     case ErrorType.ParamsContainRequiredUnsupportedSchema:
       return getLocalizedString("core.common.invalidReason.ParamsContainRequiredUnsupportedSchema");
-    case ErrorType.ParamsContainsNestedObject:
-      return getLocalizedString("core.common.invalidReason.ParamsContainsNestedObject");
-    case ErrorType.RequestBodyContainsNestedObject:
-      return getLocalizedString("core.common.invalidReason.RequestBodyContainsNestedObject");
     case ErrorType.ExceededRequiredParamsLimit:
       return getLocalizedString("core.common.invalidReason.ExceededRequiredParamsLimit");
     case ErrorType.NoParameter:
@@ -1004,7 +1101,12 @@ function parseSpec(spec: OpenAPIV3.Document): [SpecObject[], boolean] {
   return [res, needAuth];
 }
 
-const commonLanguages = [ProgrammingLanguage.TS, ProgrammingLanguage.JS, ProgrammingLanguage.PY];
+const commonLanguages = [
+  ProgrammingLanguage.TS,
+  ProgrammingLanguage.JS,
+  ProgrammingLanguage.PY,
+  ProgrammingLanguage.CSharp,
+];
 
 async function updatePromptForCustomApi(
   spec: OpenAPIV3.Document,
@@ -1012,10 +1114,14 @@ async function updatePromptForCustomApi(
   chatFolder: string
 ): Promise<void> {
   if (commonLanguages.includes(language as ProgrammingLanguage)) {
+    const object = `{ "path": null, "body": null, "query": null }`;
+    const cSharpObject = `{ "path": {}, "body": {}, "query": {} }`;
     const promptFilePath = path.join(chatFolder, "skprompt.txt");
     const prompt = `The following is a conversation with an AI assistant.\nThe assistant can help to call APIs for the open api spec file${
       spec.info.description ? ". " + spec.info.description : "."
-    }\nIf the API doesn't require parameters, invoke it with default JSON object { "path": null, "body": null, "query": null }.\n\ncontext:\nAvailable actions: {{getAction}}.`;
+    }\nIf the API doesn't require parameters, invoke it with default JSON object ${
+      (language as ProgrammingLanguage) === ProgrammingLanguage.CSharp ? cSharpObject : object
+    }.\n\ncontext:\nAvailable actions: {{getAction}}.`;
     await fs.writeFile(promptFilePath, prompt, { encoding: "utf-8", flag: "w" });
   }
 }
@@ -1024,21 +1130,89 @@ async function updateAdaptiveCardForCustomApi(
   specItems: SpecObject[],
   language: string,
   destinationPath: string
-): Promise<void> {
+): Promise<WarningResult[]> {
+  const warnings: WarningResult[] = [];
   if (commonLanguages.includes(language as ProgrammingLanguage)) {
-    const adaptiveCardsFolderPath = path.join(destinationPath, "src", "adaptiveCards");
+    let adaptiveCardsFolderPath = path.join(destinationPath, "src", "adaptiveCards");
+    if (language === ProgrammingLanguage.CSharp) {
+      adaptiveCardsFolderPath = path.join(destinationPath, "adaptiveCards");
+    }
     await fs.ensureDir(adaptiveCardsFolderPath);
 
     for (const item of specItems) {
       const name = item.item.operationId!.replace(/[^a-zA-Z0-9]/g, "_");
-      const [card, jsonPath] = AdaptiveCardGenerator.generateAdaptiveCard(item.item, true);
-      if (jsonPath !== "$" && card.body && card.body[0] && (card.body[0] as any).$data) {
-        (card.body[0] as any).$data = `\${${jsonPath}}`;
+      try {
+        const [card, jsonPath, jsonData, generateWarnings] =
+          AdaptiveCardGenerator.generateAdaptiveCard(item.item, true, 5);
+        if (jsonPath !== "$" && card.body && card.body[0] && (card.body[0] as any).$data) {
+          (card.body[0] as any).$data = `\${${jsonPath}}`;
+        }
+        const cardFilePath = path.join(adaptiveCardsFolderPath, `${name}.json`);
+        const jsonDataPath = path.join(adaptiveCardsFolderPath, `${name}.data.json`);
+        await fs.writeFile(cardFilePath, JSON.stringify(card, null, 2));
+        await fs.writeFile(jsonDataPath, JSON.stringify(jsonData, null, 2));
+
+        generateWarnings.forEach((w) => {
+          warnings.push({
+            type: WarningType.GenerateJsonDataFailed,
+            // TODO: move message to package.nls.json file
+            content: util.format(
+              "Failed to create the adaptive card mock data for API '%s': %s. Mitigation: Not required but you can manually add it to the adaptiveCards folder.",
+              item.item.operationId,
+              w.content
+            ),
+            data: item.item.operationId,
+          });
+        });
+      } catch (err) {
+        warnings.push({
+          type: WarningType.GenerateCardFailed,
+          content: getLocalizedString(
+            "core.copilotPlugin.scaffold.summary.warning.generate.ac.failed",
+            item.item.operationId,
+            err.message
+          ),
+          data: item.item.operationId,
+        });
       }
-      const cardFilePath = path.join(adaptiveCardsFolderPath, `${name}.json`);
-      await fs.writeFile(cardFilePath, JSON.stringify(card, null, 2));
     }
   }
+  return warnings;
+}
+
+function filterSchema(schema: OpenAPIV3.SchemaObject): OpenAPIV3.SchemaObject {
+  const filteredSchema: any = { type: schema.type };
+
+  if (schema.description) {
+    filteredSchema.description = schema.description;
+  }
+
+  if (schema.type === "object" && schema.properties) {
+    filteredSchema.properties = {};
+    filteredSchema.required = schema.required;
+    for (const key in schema.properties) {
+      const property = schema.properties[key] as OpenAPIV3.SchemaObject;
+      if (property.type === "object") {
+        filteredSchema.properties[key] = filterSchema(property as OpenAPIV3.SchemaObject);
+        filteredSchema.required = schema.required;
+      } else if (property.type === "array") {
+        filteredSchema.properties[key] = {
+          type: "array",
+          items: filterSchema(property.items as OpenAPIV3.SchemaObject),
+          description: property.description,
+        };
+      } else {
+        filteredSchema.properties[key] = {
+          type: property.type,
+          description: property.description,
+        };
+      }
+    }
+  } else if (schema.type === "array" && schema.items) {
+    filteredSchema.items = filterSchema(schema.items as OpenAPIV3.SchemaObject);
+  }
+
+  return filteredSchema;
 }
 
 async function updateActionForCustomApi(
@@ -1071,13 +1245,28 @@ async function updateActionForCustomApi(
               required: [],
             };
           }
-          parameters.properties[paramType].properties[param.name] = schema;
+          parameters.properties[paramType].properties[param.name] = filterSchema(schema);
           parameters.properties[paramType].properties[param.name].description =
             param.description ?? "";
           if (param.required) {
             parameters.properties[paramType].required.push(param.name);
             if (!parameters.required.includes(paramType)) {
               parameters.required.push(paramType);
+            }
+          }
+        }
+      }
+
+      const requestBody = item.item.requestBody as OpenAPIV3.RequestBodyObject;
+      if (requestBody) {
+        const content = requestBody.content;
+        if (content) {
+          const contentSchema = content["application/json"].schema as OpenAPIV3.SchemaObject;
+          if (Object.keys(contentSchema).length !== 0) {
+            parameters.properties["body"] = filterSchema(contentSchema);
+            parameters.properties["body"].description = requestBody.description ?? "";
+            if (requestBody.required) {
+              parameters.required.push("body");
             }
           }
         }
@@ -1099,14 +1288,35 @@ const ActionCode = {
 app.ai.action("{{operationId}}", async (context, state, parameter) => {
   const client = await api.getClient();
   // Add authentication configuration for the client
-  const path = client.paths["{{pathUrl}}"];
-  if (path && path.{{method}}) {
-    const result = await path.{{method}}(parameter.path, parameter.body, {
+  const apiPath = client.paths["{{pathUrl}}"];
+  if (apiPath && apiPath.{{method}}) {
+    const result = await apiPath.{{method}}(parameter.path, parameter.body, {
       params: parameter.query,
     });
+    if (!result || !result.data) {
+      throw new Error("Get empty result from api call.");
+    }
     const cardName = "{{operationId}}".replace(/[^a-zA-Z0-9]/g, "_");
-    const card = generateAdaptiveCard("../adaptiveCards/" + cardName + ".json", result);
-    await context.sendActivity({ attachments: [card] });
+    const cardTemplatePath = path.join(__dirname, '../adaptiveCards', cardName + '.json');
+    const isTeamsChannel = context.activity.channelId === Channels.Msteams;
+    if (await fs.exists(cardTemplatePath)){
+      const card = generateAdaptiveCard(cardTemplatePath, result);
+      await context.sendActivity({
+        attachments: [card],
+        ...(isTeamsChannel ? { channelData: { feedbackLoopEnabled: true }} : {}),
+        entities: [
+          {
+            type: "https://schema.org/Message",
+            "@type": "Message",
+            "@context": "https://schema.org",
+            additionalType: ["AIGeneratedContent"], // AI Generated label
+          },
+        ]
+      });
+    }
+    else {
+      await context.sendActivity(JSON.stringify(result.data));
+    }
   } else {
     await context.sendActivity("no result");
   }
@@ -1117,14 +1327,35 @@ app.ai.action("{{operationId}}", async (context, state, parameter) => {
 app.ai.action("{{operationId}}", async (context: TurnContext, state: ApplicationTurnState, parameter: any) => {
   const client = await api.getClient();
   // Add authentication configuration for the client
-  const path = client.paths["{{pathUrl}}"];
-  if (path && path.{{method}}) {
-    const result = await path.{{method}}(parameter.path, parameter.body, {
+  const apiPath = client.paths["{{pathUrl}}"];
+  if (apiPath && apiPath.{{method}}) {
+    const result = await apiPath.{{method}}(parameter.path, parameter.body, {
       params: parameter.query,
     });
+    if (!result || !result.data) {
+      throw new Error("Get empty result from api call.");
+    }
     const cardName = "{{operationId}}".replace(/[^a-zA-Z0-9]/g, "_");
-    const card = generateAdaptiveCard("../adaptiveCards/" + cardName + ".json", result);
-    await context.sendActivity({ attachments: [card] });
+    const cardTemplatePath = path.join(__dirname, '../adaptiveCards', cardName + '.json');
+    const isTeamsChannel = context.activity.channelId === Channels.Msteams;
+    if (await fs.exists(cardTemplatePath)){
+      const card = generateAdaptiveCard(cardTemplatePath, result);
+      await context.sendActivity({
+        attachments: [card],
+        ...(isTeamsChannel ? { channelData: { feedbackLoopEnabled: true }} : {}),
+        entities: [
+          {
+            type: "https://schema.org/Message",
+            "@type": "Message",
+            "@context": "https://schema.org",
+            additionalType: ["AIGeneratedContent"], // AI Generated label
+          },
+        ]
+      });
+    }
+    else {
+      await context.sendActivity(JSON.stringify(result.data));
+    }
   } else {
     await context.sendActivity("no result");
   }
@@ -1147,20 +1378,63 @@ async def {{operationId}}(
     await context.send_activity(resp.reason)
   else:
     card_template_path = os.path.join(current_dir, 'adaptiveCards/{{operationId}}.json')
-    with open(card_template_path) as card_template_file:
+    if not os.path.exists(card_template_path):
+      json_resoponse_str = resp.text
+      await context.send_activity(json_resoponse_str)
+    else:
+      with open(card_template_path) as card_template_file:
         adaptive_card_template = card_template_file.read()
 
-    renderer = AdaptiveCardRenderer(adaptive_card_template)
+      renderer = AdaptiveCardRenderer(adaptive_card_template)
 
-    json_resoponse_str = resp.text
-    rendered_card_str = renderer.render(json_resoponse_str)
-    rendered_card_json = json.loads(rendered_card_str)
-    card = CardFactory.adaptive_card(rendered_card_json)
-    message = MessageFactory.attachment(card)
-    
-    await context.send_activity(message)
+      json_resoponse_str = resp.text
+      rendered_card_str = renderer.render(json_resoponse_str)
+      rendered_card_json = json.loads(rendered_card_str)
+      card = CardFactory.adaptive_card(rendered_card_json)
+      isTeamsChannel = context.activity.channel_id == "msteams"
+      message = MessageFactory.attachment(card)
+      message.entities = [
+        {
+          "type": "https://schema.org/Message",
+          "@type": "Message",
+          "@context": "https://schema.org",
+          "additionalType": ["AIGeneratedContent"],
+        },
+      ]
+      message.channel_data = {
+        "feedbackLoopEnabled": isTeamsChannel
+      }
+      
+      await context.send_activity(message)
   return "success"
   `,
+  cs: `
+        [Action("{{operationId}}")]
+        public async Task<string> {{functionName}}Async([ActionTurnContext] ITurnContext turnContext, [ActionTurnState] TurnState turnState, [ActionParameters] Dictionary<string, object> args)
+        {
+            try
+            {
+                RequestParams requestParam = ParseRequestParams(args);
+
+                var response = await Client.CallAsync("{{apiPath}}", Method.{{apiMethod}}, requestParam);
+                var data = response.Content;
+
+                var cardTemplatePath = "./adaptiveCards/{{operationId}}.json";
+                if (File.Exists(cardTemplatePath)) {
+                    var message = RenderCardToMessage(cardTemplatePath, data);
+                    await turnContext.SendActivityAsync(message);
+                }
+                else
+                {
+                    await turnContext.SendActivityAsync(data);
+                }
+            }
+            catch (Exception ex) {
+                await turnContext.SendActivityAsync("Failed to call API with error:  " + ex.Message);
+            }
+
+            return "complete";
+        }`,
 };
 
 const AuthCode = {
@@ -1227,6 +1501,34 @@ async function updateCodeForCustomApi(
       .replace("{{OPENAPI_SPEC_PATH}}", openapiSpecFileName)
       .replace("# Replace with action code", actionsCode.join("\n"));
     await fs.writeFile(botFilePath, updateBotFileContent);
+  } else if (language === ProgrammingLanguage.CSharp) {
+    const actionsCode = [];
+    const codeTemplate = ActionCode["cs"];
+    for (const item of specItems) {
+      const code = codeTemplate
+        .replace(/{{operationId}}/g, item.item.operationId!)
+        .replace(/{{apiPath}}/g, item.pathUrl)
+        .replace(/{{apiMethod}}/g, Utils.updateFirstLetter(item.method))
+        .replace(/{{functionName}}/g, Utils.updateFirstLetter(item.item.operationId!));
+      actionsCode.push(code);
+    }
+
+    const apiActionCsFilePath = path.join(destinationPath, "APIActions.cs");
+    const apiActionCsFileContent = (await fs.readFile(apiActionCsFilePath)).toString();
+    const updateApiActionCsFileContent = apiActionCsFileContent
+      .replace("{{OPENAPI_SPEC_PATH}}", "apiSpecificationFile/" + openapiSpecFileName)
+      .replace("// Replace with action code", actionsCode.join("\n"));
+    await fs.writeFile(apiActionCsFilePath, updateApiActionCsFileContent);
+
+    const files = await fs.readdir(destinationPath);
+    const projectFileName = files.find((file) => file.endsWith(".csproj"));
+    const projectFilePath = path.join(destinationPath, projectFileName!);
+    const projectFileContent = (await fs.readFile(projectFilePath)).toString();
+    const updateProjectFileContent = projectFileContent.replace(
+      /{{OPENAPI_SPEC_PATH}}/g,
+      openapiSpecFileName
+    );
+    await fs.writeFile(projectFilePath, updateProjectFileContent);
   }
 }
 
@@ -1235,8 +1537,12 @@ export async function updateForCustomApi(
   language: string,
   destinationPath: string,
   openapiSpecFileName: string
-): Promise<void> {
-  const chatFolder = path.join(destinationPath, "src", "prompts", "chat");
+): Promise<WarningResult[]> {
+  const warnings: WarningResult[] = [];
+  let chatFolder = path.join(destinationPath, "src", "prompts", "chat");
+  if (language === ProgrammingLanguage.CSharp) {
+    chatFolder = path.join(destinationPath, "prompts", "Chat");
+  }
   await fs.ensureDir(chatFolder);
 
   // 1. update prompt folder
@@ -1245,20 +1551,99 @@ export async function updateForCustomApi(
   const [specItems, needAuth] = parseSpec(spec);
 
   // 2. update adaptive card folder
-  await updateAdaptiveCardForCustomApi(specItems, language, destinationPath);
+  const generateWarnings = await updateAdaptiveCardForCustomApi(
+    specItems,
+    language,
+    destinationPath
+  );
+
+  warnings.push(...generateWarnings);
 
   // 3. update actions file
   await updateActionForCustomApi(specItems, language, chatFolder);
 
   // 4. update code
   await updateCodeForCustomApi(specItems, language, destinationPath, openapiSpecFileName, needAuth);
+
+  // 5. add prompt suggestions
+  const manifestPath = path.join(destinationPath, AppPackageFolderName, ManifestTemplateFileName);
+  await updatePromptSuggestions(specItems, manifestPath);
+
+  return warnings;
 }
 
-const EnvNameMapping: { [authType: string]: string } = {
-  apiKey: "REGISTRATION_ID",
-  oauth2: "CONFIGURATION_ID",
-};
+async function updatePromptSuggestions(specItems: SpecObject[], manifestPath: string) {
+  const descriptions: string[] = specItems
+    .map((item) => item.item.summary ?? item.item.description)
+    .filter((item): item is string => item !== undefined)
+    .slice(0, 10);
 
-export function getEnvName(authName: string, authType?: string): string {
-  return Utils.getSafeRegistrationIdEnvName(`${authName}_${EnvNameMapping[authType ?? "apiKey"]}`);
+  const manifestRes = await manifestUtils._readAppManifest(manifestPath);
+  if (manifestRes.isOk()) {
+    const manifest = manifestRes.value;
+    manifest.bots![0].commandLists = [
+      {
+        scopes: ["personal"],
+        commands: [
+          {
+            title: "Hello, how can you help me?",
+            description: "How can you help me?",
+          },
+          {
+            title: "How to build apps with TTK?",
+            description: "How can I develop apps with Teams Toolkit?",
+          },
+          ...descriptions.map((des) => {
+            return {
+              title: des.slice(0, 32),
+              description: des.slice(0, 128),
+            };
+          }),
+        ],
+      },
+    ];
+
+    await manifestUtils._writeAppManifest(manifest, manifestPath);
+  } else {
+    throw manifestRes.error;
+  }
+}
+
+export function getEnvName(authName: string): string {
+  return Utils.getSafeRegistrationIdEnvName(`${authName}_${ConstantString.RegistrationIdPostfix}`);
+}
+
+export async function copyKiotaFolder(specPath: string, projectPath: string): Promise<void> {
+  const originKiotaFolder = path.join(path.dirname(specPath), "..", ".kiota");
+  if (!(await fs.pathExists(originKiotaFolder))) {
+    return;
+  }
+
+  const destinationKiotaFolder = path.join(projectPath, ".kiota");
+  if (await fs.pathExists(destinationKiotaFolder)) {
+    return;
+  }
+
+  await fs.ensureDir(destinationKiotaFolder);
+  await fs.copy(originKiotaFolder, destinationKiotaFolder, { recursive: true });
+  return;
+}
+
+export async function updateDeclarativeAgentManifest(
+  manifestPath: string,
+  declarativeAgentManifestPath: string,
+  declarativeCopilotActionId: string,
+  pluginManifestPath: string
+): Promise<Result<any, FxError>> {
+  const gptManifestPath = path.join(path.dirname(manifestPath), declarativeAgentManifestPath);
+  const addAcionResult = await copilotGptManifestUtils.addAction(
+    gptManifestPath,
+    declarativeCopilotActionId,
+    path.basename(pluginManifestPath)
+  );
+  if (addAcionResult.isErr()) {
+    return err(addAcionResult.error);
+  }
+
+  return ok(undefined);
 }

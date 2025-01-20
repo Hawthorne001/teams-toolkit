@@ -25,6 +25,7 @@ import { getLocalDebugSession } from "./common/localDebugSession";
 import { updateProjectStatus } from "../utils/projectStatusUtils";
 import { CommandKey } from "../constants";
 import { TeamsFxTaskType } from "./common/debugConstants";
+import detectPort from "detect-port";
 
 function saveEventTime(eventName: string, time: number) {
   const session = getLocalDebugSession();
@@ -154,6 +155,23 @@ export async function sendDebugAllEvent(
     [TelemetryMeasurements.DebugServicesGapDuration]: servicesGap,
   };
 
+  const closedPorts: number[] = [];
+  for (const port of globalVariables.LocalDebugPorts.conflictPorts) {
+    const port2 = await detectPort(port);
+    if (port2 === port) {
+      closedPorts.push(port);
+    }
+  }
+  properties["debug-checked-ports"] = globalVariables.LocalDebugPorts.checkPorts.join(",");
+  properties["debug-closed-ports"] = closedPorts.join(",");
+  properties["debug-conflict-ports"] = globalVariables.LocalDebugPorts.conflictPorts.join(",");
+  properties["debug-terminate-button"] = globalVariables.LocalDebugPorts.terminateButton;
+  properties["debug-process2conflict-ports"] = JSON.stringify(
+    globalVariables.LocalDebugPorts.process2conflictPorts
+  );
+  properties["debug-terminate-processes"] =
+    globalVariables.LocalDebugPorts.terminateProcesses.join(",");
+
   if (error === undefined) {
     localTelemetryReporter.sendTelemetryEvent(TelemetryEvent.DebugAll, properties, measurements);
   } else {
@@ -256,7 +274,7 @@ export async function getTaskInfo(): Promise<TaskInfo | undefined> {
           task?.type === TeamsFxTaskType ||
           (task?.type === "shell" &&
             task?.command &&
-            Object.values(TeamsFxNpmCommands).includes(task?.command));
+            Object.values(TeamsFxNpmCommands).includes(task?.command as any));
 
         // Only send the info scaffold by Teams Toolkit. If user changed some property, the value will be "unknown".
         dependsOnArr.push({
@@ -284,7 +302,9 @@ export async function getTaskInfo(): Promise<TaskInfo | undefined> {
 
     const teamsfxTasks = taskJson?.tasks?.filter(
       (t) =>
-        t?.type === TeamsFxTaskType && t?.command && Object.values(TaskCommand).includes(t?.command)
+        t?.type === TeamsFxTaskType &&
+        t?.command &&
+        Object.values(TaskCommand).includes(t?.command as any)
     );
 
     return {

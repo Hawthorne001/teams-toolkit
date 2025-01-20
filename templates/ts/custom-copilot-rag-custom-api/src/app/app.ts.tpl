@@ -34,6 +34,7 @@ const app = new Application({
   storage,
   ai: {
     planner,
+    enable_feedback_loop: true,
   },
 });
 
@@ -46,8 +47,13 @@ app.conversationUpdate("membersAdded", async (turnContext: TurnContext) => {
   }
 });
 
+app.feedbackLoop(async (context, state, feedbackLoopData) => {
+  //add custom feedback process logic here
+  console.log("Your feedback is " + JSON.stringify(context.activity.value));
+});
+
 import { generateAdaptiveCard, addAuthConfig } from "./utility";
-import { TurnContext, ConversationState } from "botbuilder";
+import { ConversationState, Channels } from "botbuilder";
 import { TurnState, Memory } from "@microsoft/teams-ai";
 import yaml from "js-yaml";
 import { OpenAPIClientAxios, Document } from "openapi-client-axios";

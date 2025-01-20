@@ -28,6 +28,7 @@ describe("Local Debug Tests", function () {
     localDebugTestContext = new LocalDebugTestContext("chatdata", {
       lang: "typescript",
       customCopilotRagType: "custom-copilot-rag-microsoft365",
+      llmServiceType: "llm-service-openai",
     });
     await localDebugTestContext.before();
   });
@@ -56,7 +57,7 @@ describe("Local Debug Tests", function () {
       editDotEnvFile(envPath, "SECRET_OPENAI_API_KEY", openAiKey);
 
       console.log(`
-        SECRET_AZURE_OPENAI_API_KEY=${openAiKey}
+        SECRET_OPENAI_API_KEY=${openAiKey}
       `);
 
       await startDebugging(DebugItemSelect.DebugInTeamsUsingChrome);
@@ -81,14 +82,14 @@ describe("Local Debug Tests", function () {
       if (isRealKey) {
         await validateBot(page, {
           botCommand: "Tell me about Contoso Electronics history",
-          expected: "fictional company",
+          expected: "1985",
           consentPrompt: false,
         });
       } else {
         try {
           await validateBot(page, {
             botCommand: "Tell me about Contoso Electronics history",
-            expected: "fictional company",
+            expected: "1985",
             consentPrompt: false,
           });
         } catch (error) {

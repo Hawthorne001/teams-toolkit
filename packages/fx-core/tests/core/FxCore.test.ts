@@ -4,12 +4,14 @@
 import {
   ErrorType,
   ListAPIResult,
+  ProjectType,
   SpecParser,
   SpecParserError,
   ValidationStatus,
   WarningType,
 } from "@microsoft/m365-spec-parser";
 import {
+  CLIPlatforms,
   DeclarativeCopilotManifestSchema,
   FxError,
   IQTreeNode,
@@ -34,7 +36,13 @@ import mockedEnv, { RestoreFn } from "mocked-env";
 import * as os from "os";
 import * as path from "path";
 import sinon from "sinon";
-import { FxCore, PackageService, getUuid, teamsDevPortalClient } from "../../src";
+import {
+  FxCore,
+  PackageService,
+  getLocalizedString,
+  getUuid,
+  teamsDevPortalClient,
+} from "../../src";
 import { FeatureFlagName } from "../../src/common/featureFlags";
 import { LaunchHelper } from "../../src/component/m365/launchHelper";
 import {
@@ -83,6 +91,7 @@ import {
   InvalidProjectError,
   MissingEnvironmentVariablesError,
   MissingRequiredInputError,
+  NotImplementedError,
   UserCancelError,
 } from "../../src/error/common";
 import { NoNeedUpgradeError } from "../../src/error/upgrade";
@@ -90,22 +99,25 @@ import {
   CapabilityOptions,
   QuestionNames,
   ScratchOptions,
+  SyncManifestInputs,
+  UninstallInputs,
   questionNodes,
 } from "../../src/question";
-import {
-  ApiPluginStartOptions,
-  HubOptions,
-  PluginAvailabilityOptions,
-} from "../../src/question/constants";
+import { ApiPluginStartOptions, HubOptions } from "../../src/question/constants";
 import { validationUtils } from "../../src/ui/validationUtils";
 import { MockTools, randomAppName } from "./utils";
-import { UninstallInputs } from "../../build";
 import { CoreHookContext } from "../../src/core/types";
 import * as projectHelper from "../../src/common/projectSettingsHelper";
 import * as migrationUtil from "../../src/core/middleware/utils/v3MigrationUtils";
 import * as projMigrator from "../../src/core/middleware/projectMigratorV3";
-import { VersionSource, VersionState } from "../../src/common/versionMetadata";
+import { MetadataV3, VersionSource, VersionState } from "../../src/common/versionMetadata";
 import * as pluginGeneratorHelper from "../../src/component/generator/apiSpec/helper";
+import { SyncManifestDriver } from "../../src/component/driver/teamsApp/syncManifest";
+import { ConstantString } from "../../src/common/constants";
+import { SyncManifestArgs } from "../../src/component/driver/teamsApp/interfaces/SyncManifest";
+import { WrapDriverContext } from "../../src/component/driver/util/wrapUtil";
+import * as copilotExtensionHelper from "../../src/component/generator/copilotExtension//helper";
+import { AadManifestHelper } from "../../src/component/driver/aad/utility/aadManifestHelper";
 
 const tools = new MockTools();
 
@@ -589,6 +601,114 @@ describe("Core basic APIs", () => {
       assert.isTrue(result.isOk());
     } finally {
       envUtil.readEnv = originFunc;
+      restore();
+    }
+  });
+
+  it("convertAadToNewSchema method should work fine", async () => {
+    const restore = mockedEnv({
+      TEAMSFX_DEBUG_TEMPLATE: "true", // workaround test failure that when local template not released to GitHub
+      NODE_ENV: "development", // workaround test failure that when local template not released to GitHub
+    });
+
+    try {
+      const core = new FxCore(tools);
+      const appName = await mockV3Project();
+      const projectPath = path.join(os.tmpdir(), appName);
+      const inputs: Inputs = {
+        platform: Platform.VSCode,
+        projectPath: projectPath,
+        [QuestionNames.AadAppManifestFilePath]: `${projectPath}/aad.manifest.json`,
+      };
+
+      sandbox.stub(tools.ui, "showMessage").resolves(ok("Continue"));
+      const result = await core.convertAadToNewSchema(inputs);
+      assert.isTrue(result.isOk());
+    } finally {
+      restore();
+    }
+  });
+
+  it("convertAadToNewSchema should throw file not exist error if aad.manifest.json does not exist", async () => {
+    const restore = mockedEnv({
+      TEAMSFX_DEBUG_TEMPLATE: "true", // workaround test failure that when local template not released to GitHub
+      NODE_ENV: "development", // workaround test failure that when local template not released to GitHub
+    });
+
+    try {
+      const core = new FxCore(tools);
+      const appName = await mockV3Project();
+      const projectPath = path.join(os.tmpdir(), appName);
+      const inputs: Inputs = {
+        platform: Platform.VSCode,
+        projectPath: projectPath,
+        [QuestionNames.AadAppManifestFilePath]: `/not-exist-path/aad.manifest.json`,
+      };
+
+      const result = await core.convertAadToNewSchema(inputs);
+      assert.isTrue(result.isErr());
+      if (result.isErr()) {
+        assert.isTrue(result.error instanceof FileNotFoundError);
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it("convertAadToNewSchema throw user cancel error if not confirmed", async () => {
+    const restore = mockedEnv({
+      TEAMSFX_DEBUG_TEMPLATE: "true", // workaround test failure that when local template not released to GitHub
+      NODE_ENV: "development", // workaround test failure that when local template not released to GitHub
+    });
+
+    try {
+      const core = new FxCore(tools);
+      const appName = await mockV3Project();
+      const projectPath = path.join(os.tmpdir(), appName);
+      const inputs: Inputs = {
+        platform: Platform.VSCode,
+        projectPath: projectPath,
+        [QuestionNames.AadAppManifestFilePath]: `${projectPath}/aad.manifest.json`,
+      };
+
+      const result = await core.convertAadToNewSchema(inputs);
+      assert.isTrue(result.isErr());
+      if (result.isErr()) {
+        assert.isTrue(result.error instanceof UserCancelError);
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it("convertAadToNewSchema show message when manifest is in new schema", async () => {
+    const restore = mockedEnv({
+      TEAMSFX_DEBUG_TEMPLATE: "true", // workaround test failure that when local template not released to GitHub
+      NODE_ENV: "development", // workaround test failure that when local template not released to GitHub
+    });
+
+    try {
+      const core = new FxCore(tools);
+      const appName = await mockV3Project();
+      const projectPath = path.join(os.tmpdir(), appName);
+      const inputs: Inputs = {
+        platform: Platform.VSCode,
+        projectPath: projectPath,
+        [QuestionNames.AadAppManifestFilePath]: `${projectPath}/aad.manifest.json`,
+      };
+
+      sandbox.stub(fs, "readJson").resolves({ displayName: "displayName" });
+      const showMessageStub = sandbox.stub(tools.ui, "showMessage");
+
+      const result = await core.convertAadToNewSchema(inputs);
+      sandbox.assert.calledOnceWithExactly(
+        showMessageStub,
+        "info",
+        getLocalizedString("core.convertAadToNewSchema.alreadyNewSchema") as any,
+        false
+      );
+      assert.isTrue(result.isOk());
+    } finally {
       restore();
     }
   });
@@ -1987,84 +2107,6 @@ describe("getQuestions", async () => {
   it("happy path", async () => {
     mockedEnvRestore = mockedEnv({
       TEAMSFX_CLI_DOTNET: "false",
-      [FeatureFlagName.CopilotExtension]: "false",
-    });
-    const core = new FxCore(tools);
-    const res = await core.getQuestions(Stage.create, { platform: Platform.CLI_HELP });
-    assert.isTrue(res.isOk());
-    if (res.isOk()) {
-      const node = res.value;
-      const names: string[] = [];
-      collectNodeNames(node!, names);
-      assert.deepEqual(names, [
-        "capabilities",
-        "bot-host-type-trigger",
-        "spfx-solution",
-        "spfx-install-latest-package",
-        "spfx-framework-type",
-        "spfx-webpart-name",
-        "spfx-folder",
-        "me-architecture",
-        "api-auth",
-        "custom-copilot-rag",
-        "openapi-spec-location",
-        "api-operation",
-        "custom-copilot-agent",
-        "programming-language",
-        "llm-service",
-        "azure-openai-key",
-        "azure-openai-endpoint",
-        "azure-openai-deployment-name",
-        "openai-key",
-        "office-addin-framework-type",
-        "folder",
-        "app-name",
-      ]);
-    }
-  });
-  it("happy path with runtime", async () => {
-    mockedEnvRestore = mockedEnv({
-      TEAMSFX_CLI_DOTNET: "true",
-      [FeatureFlagName.CopilotExtension]: "false",
-    });
-    const core = new FxCore(tools);
-    const res = await core.getQuestions(Stage.create, { platform: Platform.CLI_HELP });
-    assert.isTrue(res.isOk());
-    if (res.isOk()) {
-      const node = res.value;
-      const names: string[] = [];
-      collectNodeNames(node!, names);
-      assert.deepEqual(names, [
-        "runtime",
-        "capabilities",
-        "bot-host-type-trigger",
-        "spfx-solution",
-        "spfx-install-latest-package",
-        "spfx-framework-type",
-        "spfx-webpart-name",
-        "spfx-folder",
-        "me-architecture",
-        "api-auth",
-        "custom-copilot-rag",
-        "openapi-spec-location",
-        "api-operation",
-        "custom-copilot-agent",
-        "programming-language",
-        "llm-service",
-        "azure-openai-key",
-        "azure-openai-endpoint",
-        "azure-openai-deployment-name",
-        "openai-key",
-        "office-addin-framework-type",
-        "folder",
-        "app-name",
-      ]);
-    }
-  });
-
-  it("happy path: API Copilot plugin enabled", async () => {
-    const restore = mockedEnv({
-      [FeatureFlagName.CopilotExtension]: "true",
     });
     const core = new FxCore(tools);
     const res = await core.getQuestions(Stage.create, { platform: Platform.CLI_HELP });
@@ -2084,6 +2126,8 @@ describe("getQuestions", async () => {
         "me-architecture",
         "with-plugin",
         "api-plugin-type",
+        "plugin-manifest-path",
+        "plugin-opeanapi-spec-path",
         "api-auth",
         "custom-copilot-rag",
         "openapi-spec-location",
@@ -2095,7 +2139,86 @@ describe("getQuestions", async () => {
         "azure-openai-endpoint",
         "azure-openai-deployment-name",
         "openai-key",
-        "office-addin-framework-type",
+        "folder",
+        "app-name",
+      ]);
+    }
+  });
+  it("happy path with runtime", async () => {
+    mockedEnvRestore = mockedEnv({
+      TEAMSFX_CLI_DOTNET: "true",
+    });
+    const core = new FxCore(tools);
+    const res = await core.getQuestions(Stage.create, { platform: Platform.CLI_HELP });
+    assert.isTrue(res.isOk());
+    if (res.isOk()) {
+      const node = res.value;
+      const names: string[] = [];
+      collectNodeNames(node!, names);
+      assert.deepEqual(names, [
+        "runtime",
+        "capabilities",
+        "bot-host-type-trigger",
+        "spfx-solution",
+        "spfx-install-latest-package",
+        "spfx-framework-type",
+        "spfx-webpart-name",
+        "spfx-folder",
+        "me-architecture",
+        "with-plugin",
+        "api-plugin-type",
+        "plugin-manifest-path",
+        "plugin-opeanapi-spec-path",
+        "api-auth",
+        "custom-copilot-rag",
+        "openapi-spec-location",
+        "api-operation",
+        "custom-copilot-agent",
+        "programming-language",
+        "llm-service",
+        "azure-openai-key",
+        "azure-openai-endpoint",
+        "azure-openai-deployment-name",
+        "openai-key",
+        "folder",
+        "app-name",
+      ]);
+    }
+  });
+
+  it("happy path: API Copilot plugin enabled", async () => {
+    const restore = mockedEnv({});
+    const core = new FxCore(tools);
+    const res = await core.getQuestions(Stage.create, { platform: Platform.CLI_HELP });
+    assert.isTrue(res.isOk());
+    if (res.isOk()) {
+      const node = res.value;
+      const names: string[] = [];
+      collectNodeNames(node!, names);
+      assert.deepEqual(names, [
+        "capabilities",
+        "bot-host-type-trigger",
+        "spfx-solution",
+        "spfx-install-latest-package",
+        "spfx-framework-type",
+        "spfx-webpart-name",
+        "spfx-folder",
+        "me-architecture",
+        "with-plugin",
+        "api-plugin-type",
+        "plugin-manifest-path",
+        "plugin-opeanapi-spec-path",
+        "api-auth",
+        "custom-copilot-rag",
+        "openapi-spec-location",
+        "api-operation",
+        "custom-copilot-agent",
+        "programming-language",
+        "llm-service",
+        "azure-openai-key",
+        "azure-openai-endpoint",
+        "azure-openai-deployment-name",
+        "openai-key",
         "folder",
         "app-name",
       ]);
@@ -2423,7 +2546,7 @@ describe("copilotPlugin", async () => {
       assert.equal(result.error.name, "testError");
     }
   });
-  it("add API - return multiple auth error", async () => {
+  it("add API - return multiple auth", async () => {
     const appName = await mockV3Project();
     mockedEnvRestore = mockedEnv({
       TEAMSFX_CLI_DOTNET: "false",
@@ -2462,6 +2585,20 @@ describe("copilotPlugin", async () => {
           reason: [],
         },
         {
+          operationId: "getUserById2",
+          server: "https://server2",
+          api: "GET /user/{userId2}",
+          auth: {
+            name: "bearerAuth1",
+            authScheme: {
+              type: "http",
+              scheme: "bearer",
+            },
+          },
+          isValid: true,
+          reason: [],
+        },
+        {
           operationId: "getStoreOrder",
           server: "https://server",
           api: "GET /store/order",
@@ -2484,8 +2621,8 @@ describe("copilotPlugin", async () => {
           reason: [],
         },
       ],
-      validAPICount: 2,
-      allAPICount: 2,
+      validAPICount: 3,
+      allAPICount: 3,
     };
 
     const core = new FxCore(tools);
@@ -2502,11 +2639,9 @@ describe("copilotPlugin", async () => {
     sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
     sinon.stub(validationUtils, "validateInputs").resolves(undefined);
     sinon.stub(tools.ui, "showMessage").resolves(ok("Add"));
+    sinon.stub(pluginGeneratorHelper, "injectAuthAction").resolves(undefined as any);
     const result = await core.copilotPluginAddAPI(inputs);
-    assert.isTrue(result.isErr());
-    if (result.isErr()) {
-      assert.equal((result.error as FxError).name, "MultipleAuthError");
-    }
+    assert.isTrue(result.isOk());
   });
 
   it("add API - return multiple server error", async () => {
@@ -3476,6 +3611,17 @@ describe("copilotPlugin", async () => {
             },
           },
           {
+            uses: "apiKey/register",
+            with: {
+              name: "api_key2",
+              appId: "${{TEAMS_APP_ID}}",
+              apiSpecPath: "./appPackage/apiSpecificationFiles/openapi.json",
+            },
+            writeToEnvironmentFile: {
+              registrationId: "API_KEY1_REGISTRATION_ID",
+            },
+          },
+          {
             uses: "teamsApp/zipAppPackage",
             with: {
               manifestPath: "./appPackage/manifest.json",
@@ -3577,7 +3723,7 @@ describe("copilotPlugin", async () => {
         {
           uses: "apiKey/register",
           writeToEnvironmentFile: {
-            registrationId: "BEARERAUTH1_REGISTRATION_ID",
+            registrationId: "BEARERAUTH1_REGISTRATION_ID1",
           },
         },
         {
@@ -3621,6 +3767,12 @@ describe("copilotPlugin", async () => {
             },
             writeToEnvironmentFile: {
               registrationId: "BEARERAUTH1_REGISTRATION_ID",
+            },
+          },
+          {
+            uses: "apiKey/register",
+            writeToEnvironmentFile: {
+              registrationId: "BEARERAUTH1_REGISTRATION_ID1",
             },
           },
           {
@@ -3772,6 +3924,16 @@ describe("copilotPlugin", async () => {
             },
             writeToEnvironmentFile: {
               registrationId: "BEARERAUTH1_REGISTRATION_ID",
+            },
+          },
+          {
+            uses: "apiKey/register",
+            with: {
+              appId: "${{TEAMS_APP_ID}}",
+              apiSpecPath: "./appPackage/apiSpecificationFiles/openapi.json",
+            },
+            writeToEnvironmentFile: {
+              registrationId: "API_KEY1_REGISTRATION_ID",
             },
           },
           {
@@ -4067,7 +4229,7 @@ describe("copilotPlugin", async () => {
               apiSpecPath: "./appPackage/apiSpecificationFiles/openapi.json",
             },
             writeToEnvironmentFile: {
-              configurationId: "OAUTHAUTH_CONFIGURATION_ID",
+              configurationId: "OAUTHAUTH_REGISTRATION_ID",
             },
           },
           {
@@ -4219,6 +4381,17 @@ describe("copilotPlugin", async () => {
             },
             writeToEnvironmentFile: {
               registrationId: "BEARERAUTH1_REGISTRATION_ID",
+            },
+          },
+          {
+            uses: "apiKey/register",
+            with: {
+              name: "api_key_unknown",
+              appId: "${{TEAMS_APP_ID}}",
+              apiSpecPath: ".appPackage/apiSpecificationFiles/openapi.json",
+            },
+            writeToEnvironmentFile: {
+              registrationId: "API_KEY_UNKNOWN_REGISTRATION_ID",
             },
           },
           {
@@ -4556,6 +4729,45 @@ describe("copilotPlugin", async () => {
     }
   });
 
+  it("isDeclarativeAgentApp - invalid project path", async () => {
+    const core = new FxCore(tools);
+    const inputs = { projectPath: "invalid" } as Inputs;
+    const res = await core.isDelcarativeAgentApp(inputs);
+    assert.isTrue(res.isErr());
+  });
+
+  it("isDeclarativeAgentApp - true", async () => {
+    const core = new FxCore(tools);
+    const manifest = new TeamsAppManifest();
+    manifest.copilotAgents = {
+      declarativeAgents: [
+        {
+          id: "1",
+          file: "file",
+        },
+      ],
+    };
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    const inputs = { projectPath: "mock" } as Inputs;
+    const res = await core.isDelcarativeAgentApp(inputs);
+    assert.isTrue(res.isOk());
+    if (res.isOk()) {
+      assert.isTrue(res.value);
+    }
+  });
+
+  it("isDeclarativeAgentApp - false", async () => {
+    const core = new FxCore(tools);
+    const manifest = new TeamsAppManifest();
+    sinon.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    const inputs = { projectPath: "mock" } as Inputs;
+    const res = await core.isDelcarativeAgentApp(inputs);
+    assert.isTrue(res.isOk());
+    if (res.isOk()) {
+      assert.isFalse(res.value);
+    }
+  });
+
   describe("listPluginApiSpecs", async () => {
     it("success", async () => {
       const inputs = {
@@ -4750,15 +4962,16 @@ describe("addPlugin", async () => {
   afterEach(() => {
     sandbox.restore();
   });
-  it("add both action and plugin success", async () => {
+
+  it("from API spec: add action success", async () => {
     const appName = await mockV3Project();
     const inputs: Inputs = {
       platform: Platform.VSCode,
       [QuestionNames.Folder]: os.tmpdir(),
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
-      [QuestionNames.ApiSpecLocation]: "test.json",
+      [QuestionNames.ApiSpecLocation]: "test.yaml",
       [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPluginAndAction().id,
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -4770,19 +4983,18 @@ describe("addPlugin", async () => {
         },
       ],
     };
-
     sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
     sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
     sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
     sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
     sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
-      if (path.endsWith("openapi_1.json")) {
+      if (path.endsWith("openapi_1.yaml")) {
         return true;
       }
       if (path.endsWith("ai-plugin_1.json")) {
         return true;
       }
-      if (path.endsWith("openapi_2.json")) {
+      if (path.endsWith("openapi_2.yaml")) {
         return false;
       }
       if (path.endsWith("ai-plugin_2.json")) {
@@ -4793,31 +5005,57 @@ describe("addPlugin", async () => {
     sandbox
       .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
     sandbox
       .stub(copilotGptManifestUtils, "addAction")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
 
     const core = new FxCore(tools);
-    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(
-      ok({
-        warnings: [
-          { type: WarningType.OperationOnlyContainsOptionalParam, content: "fakeMessage" },
-        ],
-      })
-    );
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
 
-    sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
+    const showMessageStub = sandbox
+      .stub(tools.ui, "showMessage")
+      .callsFake((level, message, modal, items) => {
+        if (level == "info") {
+          return Promise.resolve(
+            ok(getLocalizedString("core.addPlugin.success.viewPluginManifest"))
+          );
+        } else if (level === "warn") {
+          return Promise.resolve(ok("Add"));
+        } else {
+          throw new NotImplementedError("TEST", "showMessage");
+        }
+      });
+
+    const openFileStub = sandbox.stub(tools.ui, "openFile").resolves();
+
     const result = await core.addPlugin(inputs);
     if (result.isErr()) {
       console.log(result.error);
     }
     assert.isTrue(result.isOk());
+    assert.isTrue(showMessageStub.calledTwice);
+    assert.isTrue(openFileStub.calledOnce);
+
     if (await fs.pathExists(inputs.projectPath!)) {
       await fs.remove(inputs.projectPath!);
     }
   });
 
-  it("add action only success", async () => {
+  it("from API spec: add action success with bearer token auth and teamsapp.local.yaml exist", async () => {
     const appName = await mockV3Project();
     const inputs: Inputs = {
       platform: Platform.VSCode,
@@ -4825,7 +5063,459 @@ describe("addPlugin", async () => {
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
       [QuestionNames.ApiSpecLocation]: "test.yaml",
       [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.action().id,
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+    sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
+    const writeFileStub = sandbox.stub(fs, "writeFile").resolves();
+    sandbox.stub(fs, "readFile").resolves("{{test}}" as any);
+    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
+      if (path.endsWith("openapi_1.yaml")) {
+        return true;
+      }
+      if (path.endsWith("ai-plugin_1.json")) {
+        return true;
+      }
+      if (path.endsWith("openapi_2.yaml")) {
+        return false;
+      }
+      if (path.endsWith("ai-plugin_2.json")) {
+        return false;
+      }
+      if (path.endsWith(MetadataV3.localConfigFile)) {
+        return true;
+      }
+      return true;
+    });
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotGptManifestUtils, "addAction")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+
+    const core = new FxCore(tools);
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+    sandbox
+      .stub(CopilotPluginHelper, "injectAuthAction")
+      .resolves({ defaultRegistrationIdEnvName: "test", registrationIdEnvName: "test2" });
+
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+          auth: {
+            name: "bearerAuth",
+            authScheme: {
+              type: "http",
+              scheme: "bearer",
+            },
+          },
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+
+    const showMessageStub = sandbox
+      .stub(tools.ui, "showMessage")
+      .callsFake((level, message, modal, items) => {
+        if (level == "info") {
+          return Promise.resolve(
+            ok(getLocalizedString("core.addPlugin.success.viewPluginManifest"))
+          );
+        } else if (level === "warn") {
+          return Promise.resolve(ok("Add"));
+        } else {
+          throw new NotImplementedError("TEST", "showMessage");
+        }
+      });
+
+    const openFileStub = sandbox.stub(tools.ui, "openFile").resolves();
+
+    const result = await core.addPlugin(inputs);
+    if (result.isErr()) {
+      console.log(result.error);
+    }
+    assert.isTrue(result.isOk());
+    assert.isTrue(showMessageStub.calledTwice);
+    assert.isTrue(openFileStub.calledOnce);
+    assert.equal(writeFileStub.args[0][1], "{{test2}}");
+
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
+    }
+  });
+
+  it("from API spec: add action success with oauth token auth and without teamsapp.local.yaml", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.yaml",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+    sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
+    const writeFileStub = sandbox.stub(fs, "writeFile").resolves();
+    sandbox.stub(fs, "readFile").resolves("{{test}}" as any);
+    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
+      if (path.endsWith("openapi_1.yaml")) {
+        return true;
+      }
+      if (path.endsWith("ai-plugin_1.json")) {
+        return true;
+      }
+      if (path.endsWith("openapi_2.yaml")) {
+        return false;
+      }
+      if (path.endsWith("ai-plugin_2.json")) {
+        return false;
+      }
+      if (path.endsWith(MetadataV3.localConfigFile)) {
+        return false;
+      }
+      return true;
+    });
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotGptManifestUtils, "addAction")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+
+    const core = new FxCore(tools);
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+    sandbox
+      .stub(CopilotPluginHelper, "injectAuthAction")
+      .resolves({ defaultRegistrationIdEnvName: "test", registrationIdEnvName: "test2" });
+
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+          auth: {
+            name: "oauth2",
+            authScheme: {
+              type: "oauth2",
+              flows: {
+                authorizationCode: {
+                  authorizationUrl: "https://example.com/auth",
+                  tokenUrl: "https://example.com/token",
+                  scopes: {
+                    "user.read": "Read user profile",
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+
+    const showMessageStub = sandbox
+      .stub(tools.ui, "showMessage")
+      .callsFake((level, message, modal, items) => {
+        if (level == "info") {
+          return Promise.resolve(
+            ok(getLocalizedString("core.addPlugin.success.viewPluginManifest"))
+          );
+        } else if (level === "warn") {
+          return Promise.resolve(ok("Add"));
+        } else {
+          throw new NotImplementedError("TEST", "showMessage");
+        }
+      });
+
+    const openFileStub = sandbox.stub(tools.ui, "openFile").resolves();
+
+    const result = await core.addPlugin(inputs);
+    if (result.isErr()) {
+      console.log(result.error);
+    }
+    assert.isTrue(result.isOk());
+    assert.isTrue(showMessageStub.calledTwice);
+    assert.isTrue(openFileStub.calledOnce);
+    assert.equal(writeFileStub.args[0][1], "{{test2}}");
+
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
+    }
+  });
+
+  it("from API spec: empty declarativeCopilots 1", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.yaml",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {};
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+    sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
+    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
+      if (path.endsWith("openapi_1.yaml")) {
+        return true;
+      }
+      if (path.endsWith("ai-plugin_1.json")) {
+        return true;
+      }
+      if (path.endsWith("openapi_2.yaml")) {
+        return false;
+      }
+      if (path.endsWith("ai-plugin_2.json")) {
+        return false;
+      }
+      return true;
+    });
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotGptManifestUtils, "addAction")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+
+    const core = new FxCore(tools);
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+
+    const showMessageStub = sandbox
+      .stub(tools.ui, "showMessage")
+      .callsFake((level, message, modal, items) => {
+        if (level == "info") {
+          return Promise.resolve(
+            ok(getLocalizedString("core.addPlugin.success.viewPluginManifest"))
+          );
+        } else if (level === "warn") {
+          return Promise.resolve(ok("Add"));
+        } else {
+          throw new NotImplementedError("TEST", "showMessage");
+        }
+      });
+
+    const openFileStub = sandbox.stub(tools.ui, "openFile").resolves();
+
+    const result = await core.addPlugin(inputs);
+    assert.isTrue(result.isErr());
+    if (result.isErr()) {
+      assert.isTrue(result.error instanceof UserError);
+    }
+  });
+
+  it("from API spec: empty declarativeCopilots 2", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.yaml",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+    sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
+    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
+      if (path.endsWith("openapi_1.yaml")) {
+        return true;
+      }
+      if (path.endsWith("ai-plugin_1.json")) {
+        return true;
+      }
+      if (path.endsWith("openapi_2.yaml")) {
+        return false;
+      }
+      if (path.endsWith("ai-plugin_2.json")) {
+        return false;
+      }
+      return true;
+    });
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotGptManifestUtils, "addAction")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+
+    const core = new FxCore(tools);
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+
+    const showMessageStub = sandbox
+      .stub(tools.ui, "showMessage")
+      .callsFake((level, message, modal, items) => {
+        if (level == "info") {
+          return Promise.resolve(
+            ok(getLocalizedString("core.addPlugin.success.viewPluginManifest"))
+          );
+        } else if (level === "warn") {
+          return Promise.resolve(ok("Add"));
+        } else {
+          throw new NotImplementedError("TEST", "showMessage");
+        }
+      });
+
+    const openFileStub = sandbox.stub(tools.ui, "openFile").resolves();
+
+    const result = await core.addPlugin(inputs);
+    assert.isTrue(result.isErr());
+    if (result.isErr()) {
+      assert.isTrue(result.error instanceof UserError);
+    }
+  });
+
+  it("from API spec: add action success - copilot agent", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.yaml",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotAgents = {
+      declarativeAgents: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+    sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
+    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
+      if (path.endsWith("openapi_1.yaml")) {
+        return true;
+      }
+      if (path.endsWith("ai-plugin_1.json")) {
+        return true;
+      }
+      if (path.endsWith("openapi_2.yaml")) {
+        return false;
+      }
+      if (path.endsWith("ai-plugin_2.json")) {
+        return false;
+      }
+      return true;
+    });
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotGptManifestUtils, "addAction")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+
+    const core = new FxCore(tools);
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+
+    const showMessageStub = sandbox
+      .stub(tools.ui, "showMessage")
+      .callsFake((level, message, modal, items) => {
+        if (level == "info") {
+          return Promise.resolve(
+            ok(getLocalizedString("core.addPlugin.success.viewPluginManifest"))
+          );
+        } else if (level === "warn") {
+          return Promise.resolve(ok("Add"));
+        } else {
+          throw new NotImplementedError("TEST", "showMessage");
+        }
+      });
+
+    const openFileStub = sandbox.stub(tools.ui, "openFile").resolves();
+
+    const result = await core.addPlugin(inputs);
+    if (result.isErr()) {
+      console.log(result.error);
+    }
+    assert.isTrue(result.isOk());
+    assert.isTrue(showMessageStub.calledTwice);
+    assert.isTrue(openFileStub.calledOnce);
+
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
+    }
+  });
+
+  it("from API spec: add action with warnings from CLI", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.CLI,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.yaml",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -4859,33 +5549,50 @@ describe("addPlugin", async () => {
     sandbox
       .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
     sandbox
       .stub(copilotGptManifestUtils, "addAction")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
 
     const core = new FxCore(tools);
-    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+    sandbox
+      .stub(CopilotPluginHelper, "generateFromApiSpec")
+      .resolves(
+        ok({ warnings: [{ type: WarningType.OperationOnlyContainsOptionalParam, content: "" }] })
+      );
 
-    sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
+    const showMessageStub = sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
     const result = await core.addPlugin(inputs);
-    if (result.isErr()) {
-      console.log(result.error);
-    }
+
     assert.isTrue(result.isOk());
+    assert.isTrue(showMessageStub.calledTwice);
     if (await fs.pathExists(inputs.projectPath!)) {
       await fs.remove(inputs.projectPath!);
     }
   });
 
-  it("add plugin success", async () => {
+  it("from existing plugin: add action success and not view plugin manifest", async () => {
     const appName = await mockV3Project();
     const inputs: Inputs = {
-      platform: Platform.VSCode,
+      platform: Platform.CLI,
       [QuestionNames.Folder]: os.tmpdir(),
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
-      [QuestionNames.ApiSpecLocation]: "test.json",
-      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPlugin().id,
+      [QuestionNames.PluginManifestFilePath]: "ai-plugin.json",
+      [QuestionNames.PluginOpenApiSpecFilePath]: "openapi.json",
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.existingPlugin().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -4900,18 +5607,175 @@ describe("addPlugin", async () => {
     sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
     sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
     sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
-    sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
+
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotExtensionHelper, "addExistingPlugin")
+      .resolves(ok({ destinationPluginManifestPath: "ai-plugin.json", warnings: [] }));
+
+    const core = new FxCore(tools);
+
+    const showMessageStub = sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
+    const result = await core.addPlugin(inputs);
+    if (result.isErr()) {
+      console.log(result.error);
+    }
+
+    assert.isTrue(result.isOk());
+    assert.isTrue(showMessageStub.calledTwice);
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
+    }
+  });
+
+  it("from existing plugin: add action error", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.CLI,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.PluginManifestFilePath]: "ai-plugin.json",
+      [QuestionNames.PluginOpenApiSpecFilePath]: "openapi.json",
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.existingPlugin().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotExtensionHelper, "addExistingPlugin")
+      .resolves(err(new SystemError("fakeError", "fakeError", "", "")));
+
+    sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
+
+    const core = new FxCore(tools);
+
+    const result = await core.addPlugin(inputs);
+    if (result.isErr()) {
+      console.log(result.error);
+    }
+
+    assert.isTrue(result.isErr() && result.error.name === "fakeError");
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
+    }
+  });
+
+  it("from API Spec: generateForCopilot error", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.json",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
     sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
       if (path.endsWith("openapi_1.json")) {
-        return true;
-      }
-      if (path.endsWith("ai-plugin_1.json")) {
-        return true;
-      }
-      if (path.endsWith("openapi_2.json")) {
         return false;
       }
-      if (path.endsWith("ai-plugin_2.json")) {
+      if (path.endsWith("ai-plugin_1.json")) {
+        return false;
+      }
+      return true;
+    });
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
+    sandbox
+      .stub(CopilotPluginHelper, "generateFromApiSpec")
+      .resolves(err(new SystemError("", "", "", "")));
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+    const core = new FxCore(tools);
+    const result = await core.addPlugin(inputs);
+    assert.isTrue(result.isErr());
+  });
+
+  it("from API spec: add action error", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.json",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
+      if (path.endsWith("openapi_1.json")) {
+        return false;
+      }
+      if (path.endsWith("ai-plugin_1.json")) {
         return false;
       }
       return true;
@@ -4919,19 +5783,20 @@ describe("addPlugin", async () => {
     sandbox
       .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
     sandbox
       .stub(copilotGptManifestUtils, "addAction")
-      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+      .resolves(err(new SystemError("addActionError", "addActionError", "", "")));
 
     const core = new FxCore(tools);
     sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
 
     sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
     const result = await core.addPlugin(inputs);
+    assert.isTrue(result.isErr());
     if (result.isErr()) {
-      console.log(result.error);
+      assert.equal(result.error.name, "addActionError");
     }
-    assert.isTrue(result.isOk());
     if (await fs.pathExists(inputs.projectPath!)) {
       await fs.remove(inputs.projectPath!);
     }
@@ -4945,7 +5810,7 @@ describe("addPlugin", async () => {
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
       [QuestionNames.ApiSpecLocation]: "test.json",
       [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPluginAndAction().id,
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -4969,7 +5834,7 @@ describe("addPlugin", async () => {
     }
   });
 
-  it("error: read GPT manifest error", async () => {
+  it("error: get declarative copilot manifest path error", async () => {
     const appName = await mockV3Project();
     const inputs: Inputs = {
       platform: Platform.VSCode,
@@ -4977,7 +5842,7 @@ describe("addPlugin", async () => {
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
       [QuestionNames.ApiSpecLocation]: "test.json",
       [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPluginAndAction().id,
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -4992,6 +5857,43 @@ describe("addPlugin", async () => {
     sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
     sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
     sandbox
+      .stub(copilotGptManifestUtils, "getManifestPath")
+      .resolves(err(new SystemError("getError", "getError", "", "")));
+    const core = new FxCore(tools);
+    const result = await core.addPlugin(inputs);
+    assert.isTrue(result.isErr());
+    if (result.isErr()) {
+      assert.equal(result.error.name, "getError");
+    }
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
+    }
+  });
+
+  it("error: read GPT manifest error", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiSpecLocation]: "test.json",
+      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
       .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
       .resolves(err(new SystemError("readError", "readError", "", "")));
     const core = new FxCore(tools);
@@ -4999,6 +5901,9 @@ describe("addPlugin", async () => {
     assert.isTrue(result.isErr());
     if (result.isErr()) {
       assert.equal(result.error.name, "readError");
+    }
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
     }
   });
 
@@ -5010,7 +5915,7 @@ describe("addPlugin", async () => {
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
       [QuestionNames.ApiSpecLocation]: "test.json",
       [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPluginAndAction().id,
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -5023,6 +5928,9 @@ describe("addPlugin", async () => {
     if (result.isErr()) {
       assert.equal(result.error.name, AppStudioError.TeamsAppRequiredPropertyMissingError.name);
     }
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
+    }
   });
 
   it("error: cancel", async () => {
@@ -5033,7 +5941,7 @@ describe("addPlugin", async () => {
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
       [QuestionNames.ApiSpecLocation]: "test.json",
       [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPluginAndAction().id,
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -5045,8 +5953,22 @@ describe("addPlugin", async () => {
         },
       ],
     };
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
     sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
     sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
     sandbox
       .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
@@ -5056,6 +5978,9 @@ describe("addPlugin", async () => {
     assert.isTrue(result.isErr());
     if (result.isErr()) {
       assert.isTrue(result.error instanceof UserCancelError);
+    }
+    if (await fs.pathExists(inputs.projectPath!)) {
+      await fs.remove(inputs.projectPath!);
     }
   });
 
@@ -5067,7 +5992,7 @@ describe("addPlugin", async () => {
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
       [QuestionNames.ApiSpecLocation]: "test.json",
       [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPluginAndAction().id,
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
     const manifest = new TeamsAppManifest();
@@ -5079,11 +6004,25 @@ describe("addPlugin", async () => {
         },
       ],
     };
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
     sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
     sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
     sandbox
       .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
     sandbox
       .stub(tools.ui, "showMessage")
       .resolves(err(new SystemError("uiError", "uiError", "", "")));
@@ -5093,118 +6032,54 @@ describe("addPlugin", async () => {
     if (result.isErr()) {
       assert.equal("uiError", result.error.name);
     }
-  });
-
-  it("error: generateForCopilot error", async () => {
-    const appName = await mockV3Project();
-    const inputs: Inputs = {
-      platform: Platform.VSCode,
-      [QuestionNames.Folder]: os.tmpdir(),
-      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
-      [QuestionNames.ApiSpecLocation]: "test.json",
-      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPluginAndAction().id,
-      projectPath: path.join(os.tmpdir(), appName),
-    };
-    const manifest = new TeamsAppManifest();
-    manifest.copilotExtensions = {
-      declarativeCopilots: [
-        {
-          file: "test1.json",
-          id: "action_1",
-        },
-      ],
-    };
-    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
-      if (path.endsWith("openapi_1.json")) {
-        return false;
-      }
-      if (path.endsWith("ai-plugin_1.json")) {
-        return false;
-      }
-      return true;
-    });
-    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
-    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
-    sandbox
-      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
-      .resolves(ok({} as DeclarativeCopilotManifestSchema));
-    sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
-    sandbox
-      .stub(CopilotPluginHelper, "generateFromApiSpec")
-      .resolves(err(new SystemError("", "", "", "")));
-    const core = new FxCore(tools);
-    const result = await core.addPlugin(inputs);
-    assert.isTrue(result.isErr());
-  });
-
-  it("update manifest error", async () => {
-    const appName = await mockV3Project();
-    const inputs: Inputs = {
-      platform: Platform.VSCode,
-      [QuestionNames.Folder]: os.tmpdir(),
-      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
-      [QuestionNames.ApiSpecLocation]: "test.json",
-      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.copilotPlugin().id,
-      projectPath: path.join(os.tmpdir(), appName),
-    };
-    const manifest = new TeamsAppManifest();
-    manifest.copilotExtensions = {
-      declarativeCopilots: [
-        {
-          file: "test1.json",
-          id: "action_1",
-        },
-      ],
-    };
-    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
-    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
-    sandbox
-      .stub(manifestUtils, "_writeAppManifest")
-      .resolves(err(new SystemError("writeError", "writeError", "", "")));
-    sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
-      if (path.endsWith("openapi_1.json")) {
-        return false;
-      }
-      if (path.endsWith("ai-plugin_1.json")) {
-        return false;
-      }
-
-      return true;
-    });
-    sandbox
-      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
-      .resolves(ok({} as DeclarativeCopilotManifestSchema));
-    sandbox
-      .stub(copilotGptManifestUtils, "addAction")
-      .resolves(ok({} as DeclarativeCopilotManifestSchema));
-
-    const core = new FxCore(tools);
-    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
-
-    sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
-    const result = await core.addPlugin(inputs);
-    assert.isTrue(result.isErr());
-    if (result.isErr()) {
-      assert.equal(result.error.name, "writeError");
-    }
     if (await fs.pathExists(inputs.projectPath!)) {
       await fs.remove(inputs.projectPath!);
     }
   });
 
-  it("add action error", async () => {
+  it("call kiota: success redirect to Kiota", async () => {
+    const mockedEnvRestore = mockedEnv({
+      [FeatureFlagName.KiotaIntegration]: "true",
+    });
+
     const appName = await mockV3Project();
     const inputs: Inputs = {
       platform: Platform.VSCode,
       [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
       [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
-      [QuestionNames.ApiSpecLocation]: "test.json",
-      [QuestionNames.ApiOperation]: ["GET /user/{userId}"],
-      [QuestionNames.PluginAvailability]: PluginAvailabilityOptions.action().id,
       projectPath: path.join(os.tmpdir(), appName),
     };
+
+    const core = new FxCore(tools);
+
+    const result = await core.addPlugin(inputs);
+    assert.isTrue(result.isOk());
+    if (result.isOk()) {
+      assert.equal(result.value.lastCommand, "addPlugin");
+      assert.equal(result.value.manifestPath, "manifest.json");
+    }
+
+    mockedEnvRestore();
+  });
+
+  it("call kiota: success create project with input", async () => {
+    const mockedEnvRestore = mockedEnv({
+      [FeatureFlagName.KiotaIntegration]: "true",
+    });
+
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.ApiPluginType]: ApiPluginStartOptions.apiSpec().id,
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "aiplugin-apiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "spec-apimanifest.yaml",
+      [QuestionNames.ApiOperation]: "aiplugin-apiplugin.json",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+
     const manifest = new TeamsAppManifest();
     manifest.copilotExtensions = {
       declarativeCopilots: [
@@ -5214,14 +6089,46 @@ describe("addPlugin", async () => {
         },
       ],
     };
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
     sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
     sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
     sandbox.stub(manifestUtils, "_writeAppManifest").resolves(ok(undefined));
+    sandbox.stub(pluginGeneratorHelper, "generateScaffoldingSummary").resolves("");
     sandbox.stub(fs, "pathExists").callsFake(async (path: string) => {
-      if (path.endsWith("openapi_1.json")) {
-        return false;
+      if (path.endsWith("openapi_1.yaml")) {
+        return true;
       }
       if (path.endsWith("ai-plugin_1.json")) {
+        return true;
+      }
+      if (path.endsWith("openapi_2.yaml")) {
+        return false;
+      }
+      if (path.endsWith("ai-plugin_2.json")) {
+        return false;
+      }
+      if (path.endsWith("aiplugin-apiplugin.json")) {
+        return true;
+      }
+      if (path.endsWith("spec-apimanifest.yaml")) {
+        return true;
+      }
+      if (path.endsWith("aiplugin_1-apiplugin.json")) {
+        return false;
+      }
+      if (path.endsWith("spec_1-apimanifest.yaml")) {
         return false;
       }
       return true;
@@ -5229,22 +6136,59 @@ describe("addPlugin", async () => {
     sandbox
       .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
       .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
     sandbox
       .stub(copilotGptManifestUtils, "addAction")
-      .resolves(err(new SystemError("addActionError", "addActionError", "", "")));
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
 
     const core = new FxCore(tools);
-    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+    sandbox
+      .stub(CopilotPluginHelper, "generateFromApiSpec")
+      .callsFake(
+        async (
+          specParser,
+          teamsManifestPath,
+          inputs,
+          context,
+          component,
+          projectType,
+          outputFilePath
+        ) => {
+          assert.isTrue(outputFilePath.destinationApiSpecFilePath.includes("apimanifest.yaml"));
+          assert.isTrue(outputFilePath.pluginManifestFilePath?.includes("apiplugin.json"));
+          return ok({ warnings: [] });
+        }
+      );
 
-    sandbox.stub(tools.ui, "showMessage").resolves(ok("Add"));
+    const showMessageStub = sandbox
+      .stub(tools.ui, "showMessage")
+      .callsFake((level, message, modal, items) => {
+        if (level == "info") {
+          return Promise.resolve(
+            ok(getLocalizedString("core.addPlugin.success.viewPluginManifest"))
+          );
+        } else if (level === "warn") {
+          return Promise.resolve(ok("Add"));
+        } else {
+          throw new NotImplementedError("TEST", "showMessage");
+        }
+      });
+
+    const openFileStub = sandbox.stub(tools.ui, "openFile").resolves();
+
     const result = await core.addPlugin(inputs);
-    assert.isTrue(result.isErr());
     if (result.isErr()) {
-      assert.equal(result.error.name, "addActionError");
+      console.log(result.error);
     }
+    assert.isTrue(result.isOk());
+    assert.isTrue(showMessageStub.calledTwice);
+    assert.isTrue(openFileStub.calledOnce);
+
     if (await fs.pathExists(inputs.projectPath!)) {
       await fs.remove(inputs.projectPath!);
     }
+
+    mockedEnvRestore();
   });
 
   describe("projectVersionCheck", async () => {
@@ -5291,5 +6235,657 @@ describe("addPlugin", async () => {
       const result = await core.projectVersionCheck(inputs);
       assert.isTrue(result.isErr());
     });
+    it("sync Manifest - success", async () => {
+      const core = new FxCore(tools);
+      const inputs = {
+        platform: Platform.CLI_HELP,
+        projectPath: "fake",
+        env: "dev",
+        nonInteractive: true,
+      };
+      sandbox.stub(SyncManifestDriver.prototype, "sync").resolves(ok(new Map<string, string>()));
+      const res = await core.syncManifest(inputs as SyncManifestInputs);
+      assert.isTrue(res.isOk());
+    });
+    it("sync Manifest - default CLI project path", async () => {
+      const core = new FxCore(tools);
+      const inputs = {
+        platform: Platform.CLI_HELP,
+        env: "dev",
+        nonInteractive: true,
+        ignoreLockByUT: true,
+      };
+      const defaultProjectPath = "./";
+      sandbox
+        .stub(SyncManifestDriver.prototype, "sync")
+        .callsFake(async (args: SyncManifestArgs, context: WrapDriverContext) => {
+          assert.isTrue(args.projectPath === defaultProjectPath);
+          return ok(new Map<string, string>());
+        });
+      const res = await core.syncManifest(inputs as SyncManifestInputs);
+      assert.isTrue(res.isOk());
+    });
+    it("sync Manifest - default VSC project path", async () => {
+      const core = new FxCore(tools);
+      const inputs = {
+        platform: Platform.VSCode,
+        env: "dev",
+        nonInteractive: true,
+        ignoreLockByUT: true,
+      };
+      const defaultProjectPath = path.join(os.homedir(), ConstantString.RootFolder);
+      sandbox
+        .stub(SyncManifestDriver.prototype, "sync")
+        .callsFake(async (args: SyncManifestArgs, context: WrapDriverContext) => {
+          assert.isTrue(args.projectPath === defaultProjectPath);
+          return ok(new Map<string, string>());
+        });
+      const res = await core.syncManifest(inputs as SyncManifestInputs);
+      assert.isTrue(res.isOk());
+    });
+  });
+});
+
+describe("kiotaRegenerate", async () => {
+  const sandbox = sinon.createSandbox();
+  let mockedEnvRestore: RestoreFn;
+
+  beforeEach(() => {
+    setTools(tools);
+    mockedEnvRestore = mockedEnv({
+      [FeatureFlagName.KiotaIntegration]: "true",
+    });
+  });
+
+  afterEach(() => {
+    sandbox.restore();
+    mockedEnvRestore();
+  });
+
+  it("happy path: successfully regenerate", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox.stub(copilotGptManifestUtils, "readCopilotGptManifestFile").resolves(
+      ok({
+        actions: [
+          {
+            id: "action_1",
+            file: "test-aiplugin.json",
+          },
+        ],
+      } as DeclarativeCopilotManifestSchema)
+    );
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+          auth: {
+            name: "bearerAuth",
+            authScheme: {
+              type: "http",
+              scheme: "bearer",
+            },
+          },
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+    sandbox
+      .stub(CopilotPluginHelper, "injectAuthAction")
+      .resolves({ defaultRegistrationIdEnvName: "test", registrationIdEnvName: "test" });
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isOk());
+  });
+
+  it("happy path: add new action", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox.stub(copilotGptManifestUtils, "readCopilotGptManifestFile").resolves(
+      ok({
+        actions: [
+          {
+            id: "action_1",
+            file: "test-aiplugin1.json",
+          },
+        ],
+      } as DeclarativeCopilotManifestSchema)
+    );
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+          auth: {
+            name: "bearerAuth",
+            authScheme: {
+              type: "http",
+              scheme: "bearer",
+            },
+          },
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+    sandbox
+      .stub(CopilotPluginHelper, "injectAuthAction")
+      .resolves({ defaultRegistrationIdEnvName: "test", registrationIdEnvName: "test" });
+    sandbox
+      .stub(copilotGptManifestUtils, "addAction")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(CopilotPluginHelper, "generateFromApiSpec").resolves(ok({ warnings: [] }));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isOk());
+  });
+
+  it("should throw error if fail to update plugin manifest", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox.stub(copilotGptManifestUtils, "readCopilotGptManifestFile").resolves(
+      ok({
+        actions: [
+          {
+            id: "action_1",
+            file: "test-aiplugin.json",
+          },
+        ],
+      } as DeclarativeCopilotManifestSchema)
+    );
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+          auth: {
+            name: "bearerAuth",
+            authScheme: {
+              type: "http",
+              scheme: "bearer",
+            },
+          },
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+    sandbox
+      .stub(CopilotPluginHelper, "injectAuthAction")
+      .resolves({ defaultRegistrationIdEnvName: "test", registrationIdEnvName: "test" });
+    sandbox
+      .stub(CopilotPluginHelper, "generateFromApiSpec")
+      .resolves(err(new UserError("fake-error-source", "fake-error-name", "fake-error-message")));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isErr());
+  });
+
+  it("should throw error if no project path", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+    };
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isErr());
+  });
+
+  it("should throw error if failed to read app manifest", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox
+      .stub(manifestUtils, "_readAppManifest")
+      .resolves(err(new UserError("fakeError", "fakeError", "", "")));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isErr());
+    if (result.isErr()) {
+      assert.equal(result.error.name, "fakeError");
+    }
+  });
+
+  it("should throw error if no copilotAgents in manifest", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isErr());
+    if (result.isErr()) {
+      assert.equal(result.error.name, "TeamsAppMissingRequiredCapability");
+    }
+  });
+
+  it("should throw error if failed to getManifestPath", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox
+      .stub(copilotGptManifestUtils, "getManifestPath")
+      .resolves(err(new UserError("fakeError", "fakeError", "", "")));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isErr());
+    if (result.isErr()) {
+      assert.equal(result.error.name, "fakeError");
+    }
+  });
+
+  it("should throw error if failed to readCopilotGptManifestFile", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(err(new UserError("fakeError", "fakeError", "", "")));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isErr());
+    if (result.isErr()) {
+      assert.equal(result.error.name, "fakeError");
+    }
+  });
+
+  it("should throw error if failed to add action", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.TeamsAppManifestFilePath]: "manifest.json",
+      [QuestionNames.ApiPluginManifestPath]: "test-aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const manifest = new TeamsAppManifest();
+    manifest.copilotExtensions = {
+      declarativeCopilots: [
+        {
+          file: "test1.json",
+          id: "action_1",
+        },
+      ],
+    };
+
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox.stub(manifestUtils, "_readAppManifest").resolves(ok(manifest));
+    sandbox.stub(copilotGptManifestUtils, "getManifestPath").resolves(ok("dcManifest.json"));
+    sandbox.stub(copilotGptManifestUtils, "readCopilotGptManifestFile").resolves(
+      ok({
+        actions: [
+          {
+            id: "action_1",
+            file: "test-aiplugin1.json",
+          },
+        ],
+      } as DeclarativeCopilotManifestSchema)
+    );
+    sandbox.stub(SpecParser.prototype, "list").resolves({
+      APIs: [
+        {
+          api: "GET /user/{userId}",
+          server: "https://example.com",
+          operationId: "getExample",
+          isValid: true,
+          reason: [],
+          auth: {
+            name: "bearerAuth",
+            authScheme: {
+              type: "http",
+              scheme: "bearer",
+            },
+          },
+        },
+      ],
+      allAPICount: 1,
+      validAPICount: 1,
+    });
+    sandbox
+      .stub(CopilotPluginHelper, "injectAuthAction")
+      .resolves({ defaultRegistrationIdEnvName: "test", registrationIdEnvName: "test" });
+    sandbox
+      .stub(copilotGptManifestUtils, "addAction")
+      .resolves(err(new UserError("fakeError", "fakeError", "", "")));
+
+    const core = new FxCore(tools);
+    const result = await core.kiotaRegenerate(inputs);
+    assert.isTrue(result.isErr());
+
+    if (result.isErr()) {
+      assert.equal(result.error.name, "fakeError");
+    }
+  });
+});
+
+describe("addAuthAction", async () => {
+  const sandbox = sinon.createSandbox();
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  it("happy path: successfully add auth action for api key", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.PluginManifestFilePath]: "aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      [QuestionNames.ApiOperation]: ["operation1"],
+      [QuestionNames.AuthName]: "mockAuthName",
+      [QuestionNames.ApiAuth]: "api-key",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const pluginManifest = {
+      schema_version: "1.0",
+      name_for_human: "test",
+      description_for_human: "test",
+      runtimes: [
+        {
+          type: "OpenApi",
+          auth: {
+            type: "None",
+          },
+          spec: {
+            url: "spec1.yaml",
+          },
+          run_for_functions: ["function1"],
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(pluginGeneratorHelper, "injectAuthAction").resolves({
+      defaultRegistrationIdEnvName: "test",
+      registrationIdEnvName: "test",
+    });
+    sandbox.stub(path, "normalize").returns("normalizedPath");
+    sandbox.stub(path, "join").returns("joinedPath");
+    sandbox.stub(fs, "readJson").resolves(pluginManifest);
+    sandbox.stub(fs, "writeJson").callsFake(async (path: string, data: any) => {
+      assert.equal(data.runtimes.length, 2);
+    });
+    const core = new FxCore(tools);
+    const result = await core.addAuthAction(inputs);
+    assert.isTrue(result.isOk());
+  });
+
+  it("happy path: successfully add auth action for oauth", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.PluginManifestFilePath]: "aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      [QuestionNames.ApiOperation]: ["operation1"],
+      [QuestionNames.AuthName]: "mockAuthName",
+      [QuestionNames.ApiAuth]: "oauth",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const pluginManifest = {
+      schema_version: "1.0",
+      name_for_human: "test",
+      description_for_human: "test",
+      runtimes: [
+        {
+          type: "OpenApi",
+          auth: {
+            type: "None",
+          },
+          spec: {
+            url: "spec1.yaml",
+          },
+          run_for_functions: ["function1"],
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(pluginGeneratorHelper, "injectAuthAction").resolves({
+      defaultRegistrationIdEnvName: "test",
+      registrationIdEnvName: "test",
+    });
+    sandbox.stub(path, "normalize").returns("normalizedPath");
+    sandbox.stub(path, "join").returns("joinedPath");
+    sandbox.stub(fs, "readJson").resolves(pluginManifest);
+    sandbox.stub(fs, "writeJson").callsFake(async (path: string, data: any) => {
+      assert.equal(data.runtimes.length, 2);
+    });
+    const core = new FxCore(tools);
+    const result = await core.addAuthAction(inputs);
+    assert.isTrue(result.isOk());
+  });
+
+  it("happy path: should do nothing if auth action not added", async () => {
+    const appName = await mockV3Project();
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.PluginManifestFilePath]: "aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      [QuestionNames.ApiOperation]: ["operation1"],
+      [QuestionNames.AuthName]: "mockAuthName",
+      [QuestionNames.ApiAuth]: "api-key",
+      projectPath: path.join(os.tmpdir(), appName),
+    };
+    const pluginManifest = {
+      schema_version: "1.0",
+      name_for_human: "test",
+      description_for_human: "test",
+      runtimes: [
+        {
+          type: "OpenApi",
+          auth: {
+            type: "None",
+          },
+          spec: {
+            url: "spec1.yaml",
+          },
+          run_for_functions: ["function1"],
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(pluginGeneratorHelper, "injectAuthAction").resolves(undefined);
+    sandbox.stub(path, "normalize").returns("normalizedPath");
+    sandbox.stub(path, "join").returns("joinedPath");
+    sandbox.stub(fs, "readJson").resolves(pluginManifest);
+    const writeJsonStub = sandbox.stub(fs, "writeJson").resolves();
+    const core = new FxCore(tools);
+    const result = await core.addAuthAction(inputs);
+    assert.isTrue(result.isOk());
+    assert.isTrue(writeJsonStub.notCalled);
+  });
+
+  it("should throw error when missing project path", async () => {
+    const inputs: Inputs = {
+      platform: Platform.VSCode,
+      [QuestionNames.Folder]: os.tmpdir(),
+      [QuestionNames.PluginManifestFilePath]: "aiplugin.json",
+      [QuestionNames.ApiSpecLocation]: "test-openapi.yaml",
+      [QuestionNames.ApiOperation]: ["operation1"],
+      [QuestionNames.AuthName]: "mockAuthName",
+      [QuestionNames.ApiAuth]: "api-key",
+    };
+    const pluginManifest = {
+      schema_version: "1.0",
+      name_for_human: "test",
+      description_for_human: "test",
+      runtimes: [
+        {
+          type: "OpenApi",
+          auth: {
+            type: "None",
+          },
+          spec: {
+            url: "spec1.yaml",
+          },
+          run_for_functions: ["function1"],
+        },
+      ],
+    };
+    sandbox.stub(validationUtils, "validateInputs").resolves(undefined);
+    sandbox
+      .stub(copilotGptManifestUtils, "readCopilotGptManifestFile")
+      .resolves(ok({} as DeclarativeCopilotManifestSchema));
+    sandbox.stub(pluginGeneratorHelper, "injectAuthAction").resolves({
+      defaultRegistrationIdEnvName: "test",
+      registrationIdEnvName: "test",
+    });
+    sandbox.stub(path, "normalize").returns("normalizedPath");
+    sandbox.stub(path, "join").returns("joinedPath");
+    sandbox.stub(fs, "readJson").resolves(pluginManifest);
+    sandbox.stub(fs, "writeJson").callsFake(async (path: string, data: any) => {
+      assert.equal(data.runtimes.length, 2);
+    });
+    const core = new FxCore(tools);
+    const result = await core.addAuthAction(inputs);
+    assert.isTrue(result.isErr());
   });
 });

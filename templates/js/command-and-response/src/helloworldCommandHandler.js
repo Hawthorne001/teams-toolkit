@@ -5,19 +5,17 @@ const ACData = require("adaptivecards-templating");
 class HelloWorldCommandHandler {
   triggerPatterns = "helloWorld";
 
-  async handleCommandReceived(context, message) {
+  async handleCommandReceived(context, state) {
     // verify the command arguments which are received from the client if needed.
-    console.log(`App received message: ${message.text}`);
+    console.log(`App received message: ${context.activity.text}`);
 
     // do something to process your command and return message activity as the response
-
-    // render your adaptive card for reply message
-    const cardData = {
-      title: "Your Hello World App is Running",
-      body: "Congratulations! Your Hello World App is running. Open the documentation below to learn more about how to build applications with the Teams Toolkit.",
-    };
-
-    const cardJson = new ACData.Template(helloWorldCard).expand({ $root: cardData });
+    const cardJson = new ACData.Template(helloWorldCard).expand({
+      $root: {
+        title: "Your Hello World App is Running",
+        body: "Congratulations! Your Hello World App is running. Open the documentation below to learn more about how to build applications with the Teams Toolkit.",
+      },
+    });
     return MessageFactory.attachment(CardFactory.adaptiveCard(cardJson));
   }
 }

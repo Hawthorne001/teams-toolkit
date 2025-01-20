@@ -1,7 +1,7 @@
-# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.5/yaml.schema.json
+# yaml-language-server: $schema=https://aka.ms/teams-toolkit/v1.8/yaml.schema.json
 # Visit https://aka.ms/teamsfx-v5.0-guide for details on this file
 # Visit https://aka.ms/teamsfx-actions for details on actions
-version: v1.5
+version: v1.8
 
 provision:
   # Creates a new Microsoft Entra app to authenticate users if
@@ -65,7 +65,7 @@ provision:
       # Path to manifest template
       manifestPath: ./appPackage/manifest.json
       outputZipPath: ./appPackage/build/appPackage.${{TEAMSFX_ENV}}.zip
-      outputJsonPath: ./appPackage/build/manifest.${{TEAMSFX_ENV}}.json
+      outputFolder: ./appPackage/build
 
   # Validate app package using validation rules
   - uses: teamsApp/validateAppPackage
@@ -91,6 +91,24 @@ provision:
     writeToEnvironmentFile:
       titleId: M365_TITLE_ID
       appId: M365_APP_ID
+
+  # Generate runtime appsettings to JSON file
+  - uses: file/createOrUpdateJsonFile
+    with:
+{{#isNewProjectTypeEnabled}}
+{{#PlaceProjectFileInSolutionDir}}
+      target: ../appsettings.Development.json
+{{/PlaceProjectFileInSolutionDir}}
+{{^PlaceProjectFileInSolutionDir}}
+      target: ../{{appName}}/appsettings.Development.json
+{{/PlaceProjectFileInSolutionDir}}
+{{/isNewProjectTypeEnabled}}
+{{^isNewProjectTypeEnabled}}
+      target: ./appsettings.Development.json
+{{/isNewProjectTypeEnabled}}
+      content:
+        CLIENT_ID: ${{AAD_APP_CLIENT_ID}}
+        TENANT_ID: ${{AAD_APP_TENANT_ID}}
 {{^isNewProjectTypeEnabled}}
 
   # Create or update debug profile in lauchsettings file

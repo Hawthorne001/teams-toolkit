@@ -22,13 +22,10 @@ export enum TemplateNames {
   TabSSR = "non-sso-tab-ssr",
   SsoTabSSR = "sso-tab-ssr",
   DashboardTab = "dashboard-tab",
-  NotificationRestify = "notification-restify",
+  NotificationExpress = "notification-express",
   NotificationWebApi = "notification-webapi",
-  NotificationHttpTriggerIsolated = "notification-http-trigger-isolated",
   NotificationHttpTrigger = "notification-http-trigger",
-  NotificationTimerTriggerIsolated = "notification-timer-trigger-isolated",
   NotificationTimerTrigger = "notification-timer-trigger",
-  NotificationHttpTimerTriggerIsolated = "notification-http-timer-trigger-isolated",
   NotificationHttpTimerTrigger = "notification-http-timer-trigger",
   CommandAndResponse = "command-and-response",
   Workflow = "workflow",
@@ -36,7 +33,6 @@ export enum TemplateNames {
   MessageExtension = "message-extension",
   MessageExtensionAction = "message-extension-action",
   MessageExtensionSearch = "message-extension-search",
-  MessageExtensionCopilot = "message-extension-copilot",
   M365MessageExtension = "m365-message-extension",
   TabAndDefaultBot = "non-sso-tab-default-bot",
   BotAndMessageExtension = "default-bot-message-extension",
@@ -70,35 +66,24 @@ export const Feature2TemplateName = {
   [`${CapabilityOptions.tab().id}:ssr`]: TemplateNames.SsoTabSSR,
   [`${CapabilityOptions.dashboardTab().id}:undefined`]: TemplateNames.DashboardTab,
   [`${CapabilityOptions.notificationBot().id}:${NotificationTriggerOptions.appService().id}`]:
-    TemplateNames.NotificationRestify,
+    TemplateNames.NotificationExpress,
   [`${CapabilityOptions.notificationBot().id}:${NotificationTriggerOptions.appServiceForVS().id}`]:
     TemplateNames.NotificationWebApi,
   [`${CapabilityOptions.notificationBot().id}:${
     NotificationTriggerOptions.functionsHttpTrigger().id
   }`]: TemplateNames.NotificationHttpTrigger,
   [`${CapabilityOptions.notificationBot().id}:${
-    NotificationTriggerOptions.functionsHttpTriggerIsolated().id
-  }`]: TemplateNames.NotificationHttpTriggerIsolated,
-  [`${CapabilityOptions.notificationBot().id}:${
     NotificationTriggerOptions.functionsTimerTrigger().id
   }`]: TemplateNames.NotificationTimerTrigger,
   [`${CapabilityOptions.notificationBot().id}:${
-    NotificationTriggerOptions.functionsTimerTriggerIsolated().id
-  }`]: TemplateNames.NotificationTimerTriggerIsolated,
-  [`${CapabilityOptions.notificationBot().id}:${
     NotificationTriggerOptions.functionsHttpAndTimerTrigger().id
   }`]: TemplateNames.NotificationHttpTimerTrigger,
-  [`${CapabilityOptions.notificationBot().id}:${
-    NotificationTriggerOptions.functionsHttpAndTimerTriggerIsolated().id
-  }`]: TemplateNames.NotificationHttpTimerTriggerIsolated,
   [`${CapabilityOptions.commandBot().id}:undefined`]: TemplateNames.CommandAndResponse,
   [`${CapabilityOptions.workflowBot().id}:undefined`]: TemplateNames.Workflow,
   [`${CapabilityOptions.basicBot().id}:undefined`]: TemplateNames.DefaultBot,
   [`${CapabilityOptions.me().id}:undefined`]: TemplateNames.MessageExtension,
   [`${CapabilityOptions.collectFormMe().id}:undefined`]: TemplateNames.MessageExtensionAction,
   [`${CapabilityOptions.SearchMe().id}:undefined`]: TemplateNames.MessageExtensionSearch,
-  [`${CapabilityOptions.m365SearchMe().id}:undefined:${MeArchitectureOptions.botPlugin().id}`]:
-    TemplateNames.MessageExtensionCopilot,
   [`${CapabilityOptions.m365SearchMe().id}:undefined:${MeArchitectureOptions.botMe().id}`]:
     TemplateNames.M365MessageExtension,
   [`${CapabilityOptions.nonSsoTabAndBot().id}:undefined`]: TemplateNames.TabAndDefaultBot,
@@ -110,7 +95,7 @@ export const Feature2TemplateName = {
     ApiAuthOptions.none().id
   }`]: TemplateNames.CopilotPluginFromScratch,
   [`${CapabilityOptions.m365SearchMe().id}:undefined:${MeArchitectureOptions.newApi().id}:${
-    ApiAuthOptions.apiKey().id
+    ApiAuthOptions.bearerToken().id
   }`]: TemplateNames.CopilotPluginFromScratchApiKey,
   [`${CapabilityOptions.m365SearchMe().id}:undefined:${MeArchitectureOptions.newApi().id}:${
     ApiAuthOptions.microsoftEntra().id
@@ -170,7 +155,7 @@ export const inputsToTemplateName: Map<{ [key: string]: any }, TemplateNames> = 
       [QuestionNames.Capabilities]: CapabilityOptions.notificationBot().id,
       [QuestionNames.BotTrigger]: NotificationTriggerOptions.appService().id,
     },
-    TemplateNames.NotificationRestify,
+    TemplateNames.NotificationExpress,
   ],
   [
     {
@@ -182,15 +167,6 @@ export const inputsToTemplateName: Map<{ [key: string]: any }, TemplateNames> = 
   ],
   [
     {
-      [QuestionNames.ProgrammingLanguage]: ProgrammingLanguage.CSharp,
-      [QuestionNames.Capabilities]: CapabilityOptions.notificationBot().id,
-      [QuestionNames.BotTrigger]: NotificationTriggerOptions.functionsHttpTrigger().id,
-      ["isIsolated"]: true,
-    },
-    TemplateNames.NotificationHttpTriggerIsolated,
-  ],
-  [
-    {
       [QuestionNames.Capabilities]: CapabilityOptions.notificationBot().id,
       [QuestionNames.BotTrigger]: NotificationTriggerOptions.functionsHttpTrigger().id,
     },
@@ -198,28 +174,10 @@ export const inputsToTemplateName: Map<{ [key: string]: any }, TemplateNames> = 
   ],
   [
     {
-      [QuestionNames.ProgrammingLanguage]: ProgrammingLanguage.CSharp,
-      [QuestionNames.Capabilities]: CapabilityOptions.notificationBot().id,
-      [QuestionNames.BotTrigger]: NotificationTriggerOptions.functionsTimerTrigger().id,
-      ["isIsolated"]: true,
-    },
-    TemplateNames.NotificationTimerTriggerIsolated,
-  ],
-  [
-    {
       [QuestionNames.Capabilities]: CapabilityOptions.notificationBot().id,
       [QuestionNames.BotTrigger]: NotificationTriggerOptions.functionsTimerTrigger().id,
     },
     TemplateNames.NotificationTimerTrigger,
-  ],
-  [
-    {
-      [QuestionNames.ProgrammingLanguage]: ProgrammingLanguage.CSharp,
-      [QuestionNames.Capabilities]: CapabilityOptions.notificationBot().id,
-      [QuestionNames.BotTrigger]: NotificationTriggerOptions.functionsHttpAndTimerTrigger().id,
-      ["isIsolated"]: true,
-    },
-    TemplateNames.NotificationHttpTimerTriggerIsolated,
   ],
   [
     {
@@ -242,13 +200,6 @@ export const inputsToTemplateName: Map<{ [key: string]: any }, TemplateNames> = 
   [
     { [QuestionNames.Capabilities]: CapabilityOptions.SearchMe().id },
     TemplateNames.MessageExtensionSearch,
-  ],
-  [
-    {
-      [QuestionNames.Capabilities]: CapabilityOptions.m365SearchMe().id,
-      [QuestionNames.MeArchitectureType]: MeArchitectureOptions.botPlugin().id,
-    },
-    TemplateNames.MessageExtensionCopilot,
   ],
   [
     {
@@ -286,7 +237,7 @@ export const inputsToTemplateName: Map<{ [key: string]: any }, TemplateNames> = 
     {
       [QuestionNames.Capabilities]: CapabilityOptions.m365SearchMe().id,
       [QuestionNames.MeArchitectureType]: MeArchitectureOptions.newApi().id,
-      [QuestionNames.ApiAuth]: ApiAuthOptions.apiKey().id,
+      [QuestionNames.ApiAuth]: ApiAuthOptions.bearerToken().id,
     },
     TemplateNames.CopilotPluginFromScratchApiKey,
   ],

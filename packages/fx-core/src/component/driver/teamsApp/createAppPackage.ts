@@ -21,6 +21,7 @@ import { InvalidFileOutsideOfTheDirectotryError } from "../../../error/teamsApp"
 import { getResolvedManifest, normalizePath } from "./utils/utils";
 import { copilotGptManifestUtils } from "./utils/CopilotGptManifestUtils";
 import { ManifestType } from "../../utils/envFunctionUtils";
+import { getAbsolutePath } from "../../utils/common";
 
 export const actionName = "teamsApp/zipAppPackage";
 
@@ -69,18 +70,23 @@ export class CreateAppPackageDriver implements StepDriver {
     // Deal with relative path
     // Environment variables should have been replaced by value
     // ./build/appPackage/appPackage.dev.zip instead of ./build/appPackage/appPackage.${{TEAMSFX_ENV}}.zip
-    let zipFileName = args.outputZipPath;
-    if (!path.isAbsolute(zipFileName)) {
-      zipFileName = path.join(context.projectPath, zipFileName);
-    }
+    const zipFileName = getAbsolutePath(args.outputZipPath, context.projectPath);
     const zipFileDir = path.dirname(zipFileName);
     await fs.mkdir(zipFileDir, { recursive: true });
 
-    let jsonFileName = args.outputJsonPath;
-    if (!path.isAbsolute(jsonFileName)) {
-      jsonFileName = path.join(context.projectPath, jsonFileName);
+    let jsonFileDir;
+    let teamsManifestJsonFileName;
+    const shouldwriteAllManifest = !!args.outputFolder;
+    if (args.outputJsonPath) {
+      teamsManifestJsonFileName = getAbsolutePath(args.outputJsonPath, context.projectPath);
+      jsonFileDir = path.dirname(teamsManifestJsonFileName);
+    } else {
+      jsonFileDir = getAbsolutePath(args.outputFolder!, context.projectPath);
+      teamsManifestJsonFileName = path.join(
+        jsonFileDir,
+        `manifest.${process.env.TEAMSFX_ENV!}.json`
+      );
     }
-    const jsonFileDir = path.dirname(jsonFileName);
     await fs.mkdir(jsonFileDir, { recursive: true });
 
     const appDirectory = path.dirname(manifestPath);
@@ -133,6 +139,19 @@ export class CreateAppPackageDriver implements StepDriver {
         }
       }
     }
+    if (manifest.localizationInfo && manifest.localizationInfo.defaultLanguageFile) {
+      const file = manifest.localizationInfo.defaultLanguageFile;
+      const fileName = `${appDirectory}/${file}`;
+      if (!(await fs.pathExists(fileName))) {
+        return err(
+          new FileNotFoundError(
+            actionName,
+            fileName,
+            "https://aka.ms/teamsfx-actions/teamsapp-zipAppPackage"
+          )
+        );
+      }
+    }
 
     const zip = new AdmZip();
     zip.addFile(Constants.MANIFEST_FILE, Buffer.from(JSON.stringify(manifest, null, 4)));
@@ -156,8 +175,29 @@ export class CreateAppPackageDriver implements StepDriver {
         if (relativePath.startsWith("..")) {
           return err(new InvalidFileOutsideOfTheDirectotryError(fileName));
         }
-        const dir = path.dirname(file);
-        zip.addLocalFile(fileName, dir === "." ? "" : dir);
+        const resolvedLocFileRes = await manifestUtils.resolveLocFile(fileName);
+        if (resolvedLocFileRes.isErr()) {
+          return err(resolvedLocFileRes.error);
+        }
+        if (resolvedLocFileRes.value) {
+          zip.addFile(relativePath, Buffer.from(resolvedLocFileRes.value));
+        }
+      }
+    }
+    if (manifest.localizationInfo && manifest.localizationInfo.defaultLanguageFile) {
+      const file = manifest.localizationInfo.defaultLanguageFile;
+      const fileName = path.resolve(appDirectory, file);
+      const relativePath = path.relative(appDirectory, fileName);
+      if (relativePath.startsWith("..")) {
+        return err(new InvalidFileOutsideOfTheDirectotryError(fileName));
+      }
+
+      const resolvedLocFileRes = await manifestUtils.resolveLocFile(fileName);
+      if (resolvedLocFileRes.isErr()) {
+        return err(resolvedLocFileRes.error);
+      }
+      if (resolvedLocFileRes.value) {
+        zip.addFile(relativePath, Buffer.from(resolvedLocFileRes.value));
       }
     }
 
@@ -212,17 +252,26 @@ export class CreateAppPackageDriver implements StepDriver {
       }
     }
 
-    const plugins = manifest.copilotExtensions?.plugins;
-    // API plugin
+    const plugins = manifest.copilotExtensions
+      ? manifest.copilotExtensions.plugins
+      : manifest.copilotAgents?.plugins;
     if (plugins?.length && plugins[0].file) {
-      const addFilesRes = await this.addPlugin(zip, plugins[0].file, appDirectory, context);
+      // API plugin
+      const addFilesRes = await this.addPlugin(
+        zip,
+        plugins[0].file,
+        appDirectory,
+        context,
+        !shouldwriteAllManifest ? undefined : jsonFileDir
+      );
       if (addFilesRes.isErr()) {
         return err(addFilesRes.error);
       }
     }
 
-    const declarativeCopilots = manifest.copilotExtensions?.declarativeCopilots;
-
+    const declarativeCopilots = manifest.copilotExtensions
+      ? manifest.copilotExtensions.declarativeCopilots
+      : manifest.copilotAgents?.declarativeAgents;
     // Copilot GPT
     if (declarativeCopilots?.length && declarativeCopilots[0].file) {
       const copilotGptManifestFile = path.resolve(appDirectory, declarativeCopilots[0].file);
@@ -239,7 +288,10 @@ export class CreateAppPackageDriver implements StepDriver {
         declarativeCopilots[0].file,
         copilotGptManifestFile,
         ManifestType.DeclarativeCopilotManifest,
-        context
+        context,
+        shouldwriteAllManifest
+          ? path.join(jsonFileDir, path.relative(appDirectory, copilotGptManifestFile))
+          : undefined
       );
       if (addFileWithVariableRes.isErr()) {
         return err(addFileWithVariableRes.error);
@@ -267,7 +319,8 @@ export class CreateAppPackageDriver implements StepDriver {
               zip,
               normalizePath(pluginFileRelativePath, useForwardSlash),
               appDirectory,
-              context
+              context,
+              !shouldwriteAllManifest ? undefined : jsonFileDir
             );
 
             if (addPluginRes.isErr()) {
@@ -282,11 +335,7 @@ export class CreateAppPackageDriver implements StepDriver {
 
     zip.writeZip(zipFileName);
 
-    if (await fs.pathExists(jsonFileName)) {
-      await fs.chmod(jsonFileName, 0o777);
-    }
-    await fs.writeFile(jsonFileName, JSON.stringify(manifest, null, 4));
-    await fs.chmod(jsonFileName, 0o444);
+    await this.writeJsonFile(teamsManifestJsonFileName, JSON.stringify(manifest, null, 4));
 
     const builtSuccess = [
       { content: "(√)Done: ", color: Colors.BRIGHT_GREEN },
@@ -312,8 +361,8 @@ export class CreateAppPackageDriver implements StepDriver {
     if (!args || !args.manifestPath) {
       invalidParams.push("manifestPath");
     }
-    if (!args || !args.outputJsonPath) {
-      invalidParams.push("outputJsonPath");
+    if (!args || (!args.outputJsonPath && !args.outputFolder)) {
+      invalidParams.push("outputJsonPath or outputFolder");
     }
     if (!args || !args.outputZipPath) {
       invalidParams.push("outputZipPath");
@@ -357,15 +406,17 @@ export class CreateAppPackageDriver implements StepDriver {
    * Add plugin file and plugin related files to zip.
    * @param zip zip
    * @param pluginRelativePath plugin file path relative to app package folder
-   * @param appDirectory app package path
+   * @param appDirectory app package path containing manifest template.
    * @param context context
+   * @param outputDirectory optional. Folder where we should put the resolved manifest in.
    * @returns result of adding plugin file and plugin related files
    */
   private async addPlugin(
     zip: AdmZip,
     pluginRelativePath: string,
     appDirectory: string,
-    context: WrapDriverContext
+    context: WrapDriverContext,
+    outputDirectory?: string
   ): Promise<Result<undefined, FxError>> {
     const pluginFile = path.resolve(appDirectory, pluginRelativePath);
     const checkExistenceRes = await this.validateReferencedFile(pluginFile, appDirectory);
@@ -378,7 +429,10 @@ export class CreateAppPackageDriver implements StepDriver {
       pluginRelativePath,
       pluginFile,
       ManifestType.PluginManifest,
-      context
+      context,
+      !outputDirectory
+        ? undefined
+        : path.join(outputDirectory, path.relative(appDirectory, pluginFile))
     );
     if (addFileWithVariableRes.isErr()) {
       return err(addFileWithVariableRes.error);
@@ -454,7 +508,8 @@ export class CreateAppPackageDriver implements StepDriver {
     entryName: string,
     filePath: string,
     manifestType: ManifestType,
-    context: WrapDriverContext
+    context: WrapDriverContext,
+    outputPath?: string // If outputPath exists, we will write down the file after replacing placeholders.
   ): Promise<Result<undefined, FxError>> {
     const expandedEnvVarResult = await CreateAppPackageDriver.expandEnvVars(
       filePath,
@@ -469,10 +524,25 @@ export class CreateAppPackageDriver implements StepDriver {
     const attr = await fs.stat(filePath);
     zip.addFile(entryName, Buffer.from(content), "", attr.mode);
 
+    if (outputPath && path.extname(outputPath).toLowerCase() === ".json") {
+      await this.writeJsonFile(
+        `${outputPath.substring(0, outputPath.length - 5)}.${process.env.TEAMSFX_ENV!}.json`,
+        content
+      );
+    }
+
     return ok(undefined);
   }
 
   private addFileInZip(zip: AdmZip, zipPath: string, filePath: string) {
     zip.addLocalFile(filePath, zipPath === "." ? "" : zipPath);
+  }
+
+  private async writeJsonFile(jsonFileName: string, content: string) {
+    if (await fs.pathExists(jsonFileName)) {
+      await fs.chmod(jsonFileName, 0o777);
+    }
+    await fs.writeFile(jsonFileName, content);
+    await fs.chmod(jsonFileName, 0o444);
   }
 }

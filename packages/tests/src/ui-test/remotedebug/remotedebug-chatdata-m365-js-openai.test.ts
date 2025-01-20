@@ -66,7 +66,7 @@ describe("Remote debug Tests", function () {
     async function () {
       const driver = VSBrowser.instance.driver;
       await createNewProject("chatdata", appName, {
-        aiType: "Azure OpenAI",
+        aiType: "OpenAI",
         dataOption: "Microsoft 365",
       });
       validateFileExist(projectPath, "src/index.js");
@@ -96,14 +96,14 @@ describe("Remote debug Tests", function () {
       if (isRealKey) {
         await validateBot(page, {
           botCommand: "Tell me about Contoso Electronics history",
-          expected: "fictional company",
+          expected: "1985",
           consentPrompt: false,
         });
       } else {
         try {
           await validateBot(page, {
             botCommand: "Tell me about Contoso Electronics history",
-            expected: "fictional company",
+            expected: "1985",
             consentPrompt: false,
           });
         } catch (error) {

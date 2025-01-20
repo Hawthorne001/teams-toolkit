@@ -1,36 +1,39 @@
-import * as restify from "restify";
-import * as fs from "fs";
+import express from "express";
+import fs from "fs";
+import https from "https";
+import path from "path";
 import send from "send";
 
-//Create HTTP server.
-const server = restify.createServer({
+const app = express();
+
+const sslOptions = {
   key: process.env.SSL_KEY_FILE ? fs.readFileSync(process.env.SSL_KEY_FILE) : undefined,
-  certificate: process.env.SSL_CRT_FILE ? fs.readFileSync(process.env.SSL_CRT_FILE) : undefined,
-  formatters: {
-    "text/html": (req, res, body) => {
-      return body;
-    },
-  },
-});
+  cert: process.env.SSL_CRT_FILE ? fs.readFileSync(process.env.SSL_CRT_FILE) : undefined,
+};
 
-server.get(
-  "/static/*",
-  restify.plugins.serveStatic({
-    directory: __dirname,
-  })
-);
-
-server.listen(process.env.port || process.env.PORT || 3333, function () {
-  console.log(`\n${server.name} listening to ${server.url}`);
-});
+app.use("/static/scripts", express.static(path.join(__dirname, "../lib/static/scripts")));
+app.use("/static", express.static(path.join(__dirname, "./static")));
 
 // Adding tabs to our app. This will setup routes to various views
 // Setup home page
-server.get("/", (req, res, next) => {
-  send(req, __dirname + "/views/hello.html").pipe(res);
+app.get("/", (req, res) => {
+  send(req, path.join(__dirname, "views", "hello.html")).pipe(res);
 });
 
 // Setup the static tab
-server.get("/tab", (req, res, next) => {
-  send(req, __dirname + "/views/hello.html").pipe(res);
+app.get("/tab", (req, res) => {
+  send(req, path.join(__dirname, "views", "hello.html")).pipe(res);
 });
+
+// Create HTTP server
+const port = process.env.port || process.env.PORT || 3333;
+
+if (sslOptions.key && sslOptions.cert) {
+  https.createServer(sslOptions, app).listen(port, () => {
+    console.log(`Express server listening on port ${port}`);
+  });
+} else {
+  app.listen(port, () => {
+    console.log(`Express server listening on port ${port}`);
+  });
+}

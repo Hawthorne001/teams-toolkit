@@ -20,6 +20,9 @@ export enum TelemetryEvent {
   SignOutStart = "sign-out-start",
   SignOut = "sign-out",
 
+  SwitchTenantStart = "switch-tenant-start",
+  SwitchTenant = "switch-tenant",
+
   SelectSubscription = "select-subscription",
 
   CreateProjectStart = "create-project-start",
@@ -40,9 +43,14 @@ export enum TelemetryEvent {
   ValidateManifestStart = "validate-manifest-start",
   ValidateManifest = "validate-manifest",
   ValidateApplication = "validate-application",
+  SyncManifestStart = "sync-manifest-start",
+  SyncManifest = "sync-manifest",
 
   UpdatePreviewManifestStart = "update-preview-manifest-start",
   UpdatePreviewManifest = "update-preview-manifest",
+
+  ConvertAadToNewSchemaStart = "convert-aad-to-new-schema-start",
+  ConvertAadToNewSchema = "convert-aad-to-new-schema",
 
   EditManifestTemplate = "edit-manifest-template",
   EditAadManifestTemplate = "edit-aad-manifest-template",
@@ -190,7 +198,8 @@ export enum TelemetryEvent {
   CheckPermissionStart = "check-permission-start",
   CheckPermission = "check-permission",
   OpenCopilotEnroll = "open-copilot-enroll",
-  OpenSideloadingLearnMore = "open-sideloading-learn-more",
+  OpenSideloadingEnable = "open-sideloading-learn-more",
+  OpenTestTenantLink = "open-test-tenant-link",
   OpenSignInJoinM365 = "open-sign-in-joinm365",
 
   ShowWhatIsNewNotification = "show-what-is-new-notification",
@@ -272,7 +281,13 @@ export enum TelemetryEvent {
 
   FindSimilarIssues = "find-similar-issues",
 
+  // Teams Github Copilot UI
+  InvokeTeamsAgentStart = "invoke-teams-agent-start",
   InvokeTeamsAgent = "invoke-teams-agent",
+  TroubleshootSelectedTextStart = "troubleshoot-selected-text-start",
+  TroubleshootSelectedText = "troubleshoot-selected-text",
+  TroubleshootErrorFromNotificationStart = "troubleshoot-error-from-notification-start",
+  TroubleshootErrorFromNotification = "troubleshoot-error-from-notification",
 
   // Copilot Chat
   CopilotChatStart = "copilot-chat-start",
@@ -280,6 +295,8 @@ export enum TelemetryEvent {
   CopilotChatFeedback = "copilot-chat-feedback",
   CopilotChatClickButton = "copilot-chat-click-button",
   CopilotChatUserAction = "copilot-chat-action",
+  NotifyOutputTroubleshoot = "notify-output-troubleshoot",
+  ClickToOpenOutputForTroubleshoot = "click-to-open-output-for-troubleshoot",
 
   //Office add-in related
   validateAddInManifest = "validate-addin-manifest",
@@ -287,6 +304,23 @@ export enum TelemetryEvent {
   stopAddInDebug = "stop-office-addin-debug",
   generateAddInGUID = "generate-addin-guid",
   openNewOfficeAddInProject = "open-new-office-addin-project",
+
+  CreatePluginWithManifestStart = "create-plugin-with-manifest-start",
+  CreatePluginWithManifest = "create-plugin-with-manifest",
+
+  InstallKiota = "install-kiota",
+  Configuration = "vsc-configuration",
+
+  UpdateAddPluginTreeview = "update-add-plugin-tree-view",
+
+  AddPluginWithManifest = "add-plugin-with-manifest",
+
+  KiotaRegenerateStart = "kiota-regenerate-start",
+  KiotaRegenerate = "kiota-regenerate",
+
+  AddAuthActionStart = "add-auth-action-start",
+  AddAuthAction = "add-auth-action",
+  ProvisionFromAddAuthConfig = "provision-from-add-auth-config",
 }
 
 export enum TelemetryProperty {
@@ -406,6 +440,8 @@ export enum TelemetryProperty {
   CopilotChatResponseTokenPerSecond = "copilot-chat-response-token-per-second",
   CopilotChatRequestToken = "copilot-chat-request-token",
   CopilotChatResponseToken = "copilot-chat-response-token",
+  KiotaInstalled = "kiota-installed",
+  ShowAddPluginTreeView = "show-add-plugin-tree-view",
 }
 
 export enum TelemetryMeasurements {
@@ -429,15 +465,20 @@ export enum TelemetryTriggerFrom {
   EditorTitle = "EditorTitle",
   SideBar = "SideBar",
   WalkThrough = "WalkThrough",
+  WalkThroughIntroduction = "WalkThroughIntroduction",
+  WalkThroughCreate = "WalkThroughCreate",
+  WalkThroughWhatIsNext = "WalkThroughWhatIsNext",
+  WalkThroughIntelligentAppsIntroduction = "WalkThroughIntelligentAppsIntroduction",
+  WalkThroughIntelligentAppsCreate = "WalkThroughIntelligentAppsCreate",
   Notification = "Notification",
   QuickPick = "QuickPick",
   InProductDoc = "InProductDoc",
   AccountHelp = "AccountHelp",
-  SideloadingDisabled = "SideloadingDisabled",
   SampleGallery = "SampleGallery",
   SampleDetailPage = "SampleDetailPage",
   CopilotChat = "CopilotChat",
   CreateAppQuestionFlow = "CreateAppQuestionFlow",
+  EditorContextMenu = "EditorContextMenu",
   Other = "Other",
   Auto = "Auto",
   Unknow = "Unknow",

@@ -21,6 +21,7 @@ import { NotExtendedToM365Error } from "./errors";
 import { PackageService } from "./packageService";
 import { MosServiceEndpoint, MosServiceScope } from "./serviceConstant";
 import { officeBaseUrl, outlookBaseUrl, outlookCopilotAppId } from "./constants";
+import { featureFlagManager, FeatureFlags } from "../../common/featureFlags";
 
 export class LaunchHelper {
   private readonly m365TokenProvider: M365TokenProvider;
@@ -66,6 +67,7 @@ export class LaunchHelper {
         url = new URL(baseUrl);
         const tid = await this.getTidFromToken();
         if (tid) {
+          url.searchParams.append("tenantId", tid);
           url.searchParams.append("appTenantId", tid);
         }
         break;

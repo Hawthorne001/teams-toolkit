@@ -5,7 +5,18 @@
  * @author yuqzho@microsoft.com
  */
 
-import { Context, FxError, GeneratorResult, Inputs, ok, Result } from "@microsoft/teamsfx-api";
+import {
+  AppPackageFolderName,
+  Context,
+  err,
+  FxError,
+  GeneratorResult,
+  Inputs,
+  ManifestTemplateFileName,
+  ok,
+  Platform,
+  Result,
+} from "@microsoft/teamsfx-api";
 import { DefaultTemplateGenerator } from "../templates/templateGenerator";
 import {
   ApiAuthOptions,
@@ -21,11 +32,16 @@ import { TemplateNames } from "../templates/templateNames";
 import { TemplateInfo } from "../templates/templateInfo";
 import { featureFlagManager, FeatureFlags } from "../../../common/featureFlags";
 import { declarativeCopilotInstructionFileName } from "../constant";
+import { addExistingPlugin } from "./helper";
+import path from "path";
+import { copilotGptManifestUtils } from "../../driver/teamsApp/utils/CopilotGptManifestUtils";
+import { outputScaffoldingWarningMessage } from "../../utils/common";
 
 const enum telemetryProperties {
   templateName = "template-name",
   isDeclarativeCopilot = "is-declarative-copilot",
   isMicrosoftEntra = "is-microsoft-entra",
+  needAddPluginFromExisting = "need-add-plugin-from-existing",
 }
 
 /**
@@ -37,7 +53,7 @@ export class CopilotExtensionGenerator extends DefaultTemplateGenerator {
   componentName = "copilot-extension-from-scratch-generator";
   public activate(context: Context, inputs: Inputs): boolean {
     return (
-      (inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeCopilot().id &&
+      (inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeAgent().id &&
         inputs[QuestionNames.ApiPluginType] !== ApiPluginStartOptions.apiSpec().id) ||
       (inputs[QuestionNames.Capabilities] === CapabilityOptions.apiPlugin().id &&
         inputs[QuestionNames.ApiPluginType] === ApiPluginStartOptions.newApi().id)
@@ -65,15 +81,14 @@ export class CopilotExtensionGenerator extends DefaultTemplateGenerator {
         inputs.placeProjectFileInSolutionDir === "true"
       ),
       DeclarativeCopilot: isDeclarativeCopilot ? "true" : "",
-      FileFunction: featureFlagManager.getBooleanValue(FeatureFlags.EnvFileFunc) ? "true" : "",
       MicrosoftEntra: auth === ApiAuthOptions.microsoftEntra().id ? "true" : "",
     };
 
     const filterFn = (fileName: string) => {
-      if (fileName.toLowerCase().includes("declarativecopilot.json")) {
+      if (fileName.toLowerCase().includes("declarativeagent.json")) {
         return isDeclarativeCopilot;
       } else if (fileName.includes(declarativeCopilotInstructionFileName)) {
-        return isDeclarativeCopilot && featureFlagManager.getBooleanValue(FeatureFlags.EnvFileFunc);
+        return isDeclarativeCopilot;
       } else {
         return true;
       }
@@ -98,6 +113,9 @@ export class CopilotExtensionGenerator extends DefaultTemplateGenerator {
       [telemetryProperties.isDeclarativeCopilot]: isDeclarativeCopilot.toString(),
       [telemetryProperties.isMicrosoftEntra]:
         auth === ApiAuthOptions.microsoftEntra().id ? "true" : "",
+      [telemetryProperties.needAddPluginFromExisting]:
+        inputs[QuestionNames.ApiPluginType] ===
+        ApiPluginStartOptions.existingPlugin().id.toString(),
     });
 
     return Promise.resolve(
@@ -112,16 +130,52 @@ export class CopilotExtensionGenerator extends DefaultTemplateGenerator {
     );
   }
 
-  public post(
+  public async post(
     context: Context,
     inputs: Inputs,
     destinationPath: string,
     actionContext?: ActionContext
   ): Promise<Result<GeneratorResult, FxError>> {
-    return Promise.resolve(ok({}));
+    const isAddingFromExistingPlugin =
+      inputs[QuestionNames.ApiPluginType] === ApiPluginStartOptions.existingPlugin().id;
+    if (isAddingFromExistingPlugin) {
+      const teamsManifestPath = path.join(
+        destinationPath,
+        AppPackageFolderName,
+        ManifestTemplateFileName
+      );
+      const declarativeCopilotManifestPathRes = await copilotGptManifestUtils.getManifestPath(
+        teamsManifestPath
+      );
+      if (declarativeCopilotManifestPathRes.isErr()) {
+        return err(declarativeCopilotManifestPathRes.error);
+      }
+      const addPluginRes = await addExistingPlugin(
+        declarativeCopilotManifestPathRes.value,
+        inputs[QuestionNames.PluginManifestFilePath],
+        inputs[QuestionNames.PluginOpenApiSpecFilePath],
+        "action_1",
+        context,
+        this.componentName
+      );
+
+      if (addPluginRes.isErr()) {
+        return err(addPluginRes.error);
+      } else {
+        if (inputs.platform === Platform.CLI || inputs.platform === Platform.VS) {
+          const warningMessage = outputScaffoldingWarningMessage(addPluginRes.value.warnings);
+          if (warningMessage) {
+            context.logProvider.info(warningMessage);
+          }
+        }
+        return ok({ warnings: addPluginRes.value.warnings });
+      }
+    } else {
+      return ok({});
+    }
   }
 }
 
 function checkDeclarativeCopilot(inputs: Inputs) {
-  return inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeCopilot().id;
+  return inputs[QuestionNames.Capabilities] === CapabilityOptions.declarativeAgent().id;
 }
